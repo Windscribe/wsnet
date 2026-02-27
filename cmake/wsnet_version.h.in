@@ -1,0 +1,6 @@
+#pragma once
+
+#define WSNET_VERSION_MAJOR @wsnet_VERSION_MAJOR@
+#define WSNET_VERSION_MINOR @wsnet_VERSION_MINOR@
+#define WSNET_VERSION_PATCH @wsnet_VERSION_PATCH@
+#define WSNET_VERSION_STRING "@wsnet_VERSION@"

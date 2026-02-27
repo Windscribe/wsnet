@@ -1,0 +1,118 @@
+stages:
+  - Build
+  - Test
+  - Artifact Links
+
+variables:
+  BUILD_WIN: 'y'
+  BUILD_WIN_ARM64: 'y'
+  BUILD_MAC: 'y'
+  BUILD_LINUX: 'y'
+  BUILD_LINUX_ARM64: 'y'
+  BUILD_LINUX_CLI: 'y'
+  NIGHTLY_TEST_BUILD: 'n'
+  GIT_DEPTH: 5 # Only grab the last 5 commits when cloning
+  NEXUS_PATH_ROOT: 'https://nexus.int.windscribe.com/repository/client-desktop/client-desktop'
+  NEXUS_PATH_DEPS: '$NEXUS_PATH_ROOT/dependencies/current'
+  NEXUS_PATH_VCPKG_CACHE: '$NEXUS_PATH_ROOT/vcpkg_cache/current'
+  NEXUS_PATH_BRANCH_UPLOAD: '${NEXUS_PATH_ROOT}/branches/${CI_COMMIT_BRANCH}'
+  NEXUS_PATH_TAGGED_UPLOAD: '${NEXUS_PATH_ROOT}/tagged-builds'
+  ARCH_LINUX_BUILD_PATH: '/home/build/windscribe'
+  RHEL_CMAKE_BUILD_PATH: '/home/build/windscribe'
+  BUILD_LIBS_FOLDER: 'build-libs'
+  VCPKG_ROOT_WINDOWS: 'c:\vcpkg'
+  VCPKG_DEFAULT_BINARY_CACHE_WINDOWS: 'c:\vcpkg_cache'
+
+.template_win10_build: &template_win10_build
+  tags: [win10qty6]
+  before_script:
+    - $env:VCPKG_ROOT = $env:VCPKG_ROOT_WINDOWS
+    - $env:VCPKG_DEFAULT_BINARY_CACHE = $env:VCPKG_DEFAULT_BINARY_CACHE_WINDOWS
+    - $env:VCPKG_INSTALL_OPTIONS = "--clean-after-build"
+    - if (Test-Path ws-vcpkg-registry) { Remove-Item -Recurse -Force ws-vcpkg-registry }
+    - git clone https://github.com/Windscribe/ws-vcpkg-registry.git
+    - .\ws-vcpkg-registry\install-vcpkg\vcpkg_install.bat $env:VCPKG_ROOT_WINDOWS --configure-git
+  interruptible: true
+
+.template_mac_build: &template_mac_build
+  tags: [macos-arm64-qt6]
+  before_script:
+    - export VCPKG_ROOT="${HOME}/vcpkg"
+    - export VCPKG_INSTALL_OPTIONS="--clean-after-build"
+    - rm -rf ws-vcpkg-registry
+    - git clone https://github.com/Windscribe/ws-vcpkg-registry.git
+    - ./ws-vcpkg-registry/install-vcpkg/vcpkg_install.sh "${VCPKG_ROOT}" --configure-git
+  interruptible: true
+
+.template_aarch64_ubuntu_build: &template_aarch64_ubuntu_build
+  tags: [linux-arm64-qt6]
+  image: registry.gitlab.int.windscribe.com:5005/ws/client/desktop/client-desktop/ubuntu-aarch64
+  before_script:
+    - python3 -m pip install --user -r tools/requirements.txt
+    # hack to fix 777 file permissions, which breaks the dpkg-deb command in the build_all script.
+    - chmod -R o-w src/installer/linux
+    # vcpkg settings
+    - export VCPKG_ROOT="${HOME}/vcpkg"
+    - export VCPKG_FORCE_SYSTEM_BINARIES=1
+    - wget -q https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-aarch64.tar.gz && mkdir -p tools/patchelf && tar -C tools/patchelf -xzf patchelf-0.18.0-aarch64.tar.gz
+    - export PATH=${RHEL_CMAKE_BUILD_PATH}/bin:`pwd`/tools/patchelf/bin:$PATH
+    - cmake --version
+    - ninja --version
+  interruptible: true
+
+.template_rhel_build: &template_rhel_build
+  # RHEL 8.4 is the minimum build target for Qt 6.5
+  # Could not use the RHEL 8.4 ubi Docker images, as they require a subscription license in order to install many of the packages we require below.
+  image: registry.gitlab.int.windscribe.com:5005/ws/client/desktop/client-desktop/fedora36
+  before_script:
+    # hack to fix 777 file permissions, which breaks the dpkg-deb command in the build_all script.
+    - chmod -R o-w src/installer/linux
+    # vcpkg settings
+    - export VCPKG_ROOT="${HOME}/vcpkg"
+    - export PATH=${RHEL_CMAKE_BUILD_PATH}/bin:$PATH
+    - python3 -m pip install -r tools/requirements.txt
+  interruptible: true
+
+
+
+build:wsnet:win:
+  <<: *template_win10_build
+  stage: Build
+  variables:
+    GIT_STRATEGY: clone
+  script:
+    - cmake -B build -S .
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      -DVCPKG_TARGET_TRIPLET=ws-x64-windows-static-release
+      -DVCPKG_HOST_TRIPLET=ws-x64-windows-static-release
+      -DIS_BUILD_TESTS=ON
+    - cmake --build build --config Release --parallel
+  rules:
+    - if: $BUILD_WIN == "y" && $NIGHTLY_TEST_BUILD == "y"
+    - if: $CI_PIPELINE_SOURCE == "push" && $BUILD_WIN == "y"
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - build/test
+
+build:wsnet:mac:
+  <<: *template_mac_build
+  stage: Build
+  variables:
+    GIT_STRATEGY: clone
+  script:
+    - cmake -B build -S .
+      -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      -DVCPKG_TARGET_TRIPLET=ws-universal-osx
+      -DIS_BUILD_TESTS=ON
+    - cmake --build build --parallel
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - build/test
+      - build/libs/wsnet
+      - build/_cmrc
+  rules:
+    - if: $BUILD_MAC == "y" && $NIGHTLY_TEST_BUILD == "y"
+    - if: $CI_PIPELINE_SOURCE == "push" && $BUILD_MAC == "y"
+
