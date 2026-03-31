@@ -10,7 +10,6 @@ NumberOfCores=$(nproc || echo 4)
 
 # Get the absolute path to the overlay ports directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OVERLAY_PORTS_PATH="../../../tools/vcpkg/ports"
 
 # Clean up safely
 [ -d temp ] && rm -rf temp
@@ -26,7 +25,6 @@ for arch in "${ARCHITECTURES[@]}"; do
     -DVCPKG_TARGET_ANDROID=ON \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-    -DVCPKG_OVERLAY_PORTS="$OVERLAY_PORTS_PATH" \
     -G Ninja
 
   cmake --build "temp/build/$arch" -j "$NumberOfCores"
