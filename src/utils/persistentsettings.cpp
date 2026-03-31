@@ -37,8 +37,12 @@ PersistentSettings::PersistentSettings(const std::string &settings)
             authHash_ = jsonObject["authHash"].GetString();
         if (jsonObject.HasMember("sessionStatus"))
             sessionStatus_ = jsonObject["sessionStatus"].GetString();
-        if (jsonObject.HasMember("locations"))
-            locations_ = jsonObject["locations"].GetString();
+        if (jsonObject.HasMember("invLocations"))
+            invLocations_ = jsonObject["invLocations"].GetString();
+        if (jsonObject.HasMember("invServers"))
+            invServers_ = jsonObject["invServers"].GetString();
+        if (jsonObject.HasMember("invRevision") && jsonObject["invRevision"].IsInt64())
+            invRevision_ = jsonObject["invRevision"].GetInt64();
         if (jsonObject.HasMember("serverCredentialsOvpn"))
             serverCredentialsOvpn_ = jsonObject["serverCredentialsOvpn"].GetString();
         if (jsonObject.HasMember("serverCredentialsIkev2"))
@@ -131,16 +135,40 @@ std::string PersistentSettings::sessionStatus() const
     return sessionStatus_;
 }
 
-void PersistentSettings::setLocations(const std::string &locations)
+void PersistentSettings::setInvLocations(const std::string &invLocations)
 {
     std::lock_guard locker(mutex_);
-    locations_ = locations;
+    invLocations_ = invLocations;
 }
 
-std::string PersistentSettings::locations() const
+std::string PersistentSettings::invLocations() const
 {
     std::lock_guard locker(mutex_);
-    return locations_;
+    return invLocations_;
+}
+
+void PersistentSettings::setInvServers(const std::string &invServers)
+{
+    std::lock_guard locker(mutex_);
+    invServers_ = invServers;
+}
+
+std::string PersistentSettings::invServers() const
+{
+    std::lock_guard locker(mutex_);
+    return invServers_;
+}
+
+void PersistentSettings::setInvRevision(std::int64_t revision)
+{
+    std::lock_guard locker(mutex_);
+    invRevision_ = revision;
+}
+
+std::int64_t PersistentSettings::invRevision() const
+{
+    std::lock_guard locker(mutex_);
+    return invRevision_;
 }
 
 void PersistentSettings::setServerCredentialsOvpn(const std::string &serverCredentials)
@@ -256,8 +284,12 @@ std::string PersistentSettings::getAsString() const
         doc.AddMember("authHash", StringRef(authHash_.c_str()), doc.GetAllocator());
     if (!sessionStatus_.empty())
         doc.AddMember("sessionStatus", StringRef(sessionStatus_.c_str()), doc.GetAllocator());
-    if (!locations_.empty())
-        doc.AddMember("locations", StringRef(locations_.c_str()), doc.GetAllocator());
+    if (!invLocations_.empty())
+        doc.AddMember("invLocations", StringRef(invLocations_.c_str()), doc.GetAllocator());
+    if (!invServers_.empty())
+        doc.AddMember("invServers", StringRef(invServers_.c_str()), doc.GetAllocator());
+    if (invRevision_ != 0)
+        doc.AddMember("invRevision", invRevision_, doc.GetAllocator());
     if (!serverCredentialsOvpn_.empty())
         doc.AddMember("serverCredentialsOvpn", StringRef(serverCredentialsOvpn_.c_str()), doc.GetAllocator());
     if (!serverCredentialsIkev2_.empty())

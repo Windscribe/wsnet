@@ -189,5 +189,36 @@ The following results may be returned in the callback function:
 * *kNetworkError = 1*, *kNoNetworkConnection = 2*. Various network errors, it is recommended to repeat the request from the client side
 * *kFailoverFailed = 3*. This means that all failovers have been tried and none of them work. In this case, it is recommended to prompt the user to ignore SSL-errors and try the queries again. Otherwise, there's nothing more we can do. There will be no connection to the server API.
 
+# Versioning
+
+The library version is derived automatically from git tags at build time — no manual edits to `CMakeLists.txt` are needed.
+
+## Version format
+
+Tags follow the `MAJOR.MINOR.PATCH` format (e.g. `1.4.8`). Two macros are available in the generated `wsnet_version.h` header:
+
+| Macro | Example value | Description |
+|---|---|---|
+| `WSNET_VERSION_STRING` | `"1.4.8"` | Clean version from the nearest tag |
+| `WSNET_VERSION_DESCRIBE` | `"1.4.8-20-ga2bf011"` | Full build ID: tag + commits since tag + commit hash |
+| `WSNET_VERSION_MAJOR` | `1` | Major version number |
+| `WSNET_VERSION_MINOR` | `4` | Minor version number |
+| `WSNET_VERSION_PATCH` | `8` | Patch version number |
+
+On an untagged commit `WSNET_VERSION_DESCRIBE` includes the number of commits since the last tag and the short commit hash, which makes it easy to identify the exact build from logs.
+
+## Releasing a new version
+
+```bash
+git tag -a 1.5.0 -m "Release 1.5.0"
+git push origin 1.5.0
+```
+
+The next CI build will automatically pick up the new version.
+
+## Fallback
+
+If git is unavailable or the repository has no tags, the build falls back to the hardcoded version defined by `WSNET_VERSION_FALLBACK` in `CMakeLists.txt`.
+
 # Further improvements
 * For Server API functions to make results return as wrapper classes instead of raw json data?

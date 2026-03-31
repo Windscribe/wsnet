@@ -60,13 +60,13 @@ if (VCPKG_TARGET_ANDROID)
     # The variable must be stored in the cache in order to successfully the two toolchains.
     #
     if (ANDROID_ABI MATCHES "arm64-v8a")
-        set(VCPKG_TARGET_TRIPLET "arm64-android" CACHE STRING "" FORCE)
+        set(VCPKG_TARGET_TRIPLET "ws-arm64-android" CACHE STRING "" FORCE)
     elseif(ANDROID_ABI MATCHES "armeabi-v7a")
-        set(VCPKG_TARGET_TRIPLET "arm-neon-android" CACHE STRING "" FORCE)
+        set(VCPKG_TARGET_TRIPLET "ws-arm-neon-android" CACHE STRING "" FORCE)
     elseif(ANDROID_ABI MATCHES "x86_64")
-        set(VCPKG_TARGET_TRIPLET "x64-android" CACHE STRING "" FORCE)
+        set(VCPKG_TARGET_TRIPLET "ws-x64-android" CACHE STRING "" FORCE)
     elseif(ANDROID_ABI MATCHES "x86")
-        set(VCPKG_TARGET_TRIPLET "x86-android" CACHE STRING "" FORCE)
+        set(VCPKG_TARGET_TRIPLET "ws-x86-android" CACHE STRING "" FORCE)
     else()
         message(FATAL_ERROR "
         Please specify ANDROID_ABI

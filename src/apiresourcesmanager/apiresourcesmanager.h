@@ -2,16 +2,31 @@
 
 #include "WSNetApiResourcesManager.h"
 #include <boost/asio.hpp>
+#include <map>
 #include <optional>
 #include "WSNetServerAPI.h"
 #include "connectstate.h"
+#include "inventoryparser.h"
 #include "sessionstatus.h"
 #include "utils/persistentsettings.h"
 #include "utils/cancelablecallback.h"
 
 namespace wsnet {
 
-enum class RequestType { kSessionStatus, kAuthToken, kLocations, kServerCredentialsOpenVPN, kServerCredentialsIkev2, kServerConfigs, kPortMap, kStaticIps, kNotifications, kCheckUpdate, kAmneziawgUnblockParams };
+enum class RequestType {
+    kSessionStatus,
+    kAuthToken,
+    kInventoryLocations,
+    kInventoryServers,
+    kServerCredentialsOpenVPN,
+    kServerCredentialsIkev2,
+    kServerConfigs,
+    kPortMap,
+    kStaticIps,
+    kNotifications,
+    kCheckUpdate,
+    kAmneziawgUnblockParams
+};
 
 class ApiResourcesManager : public WSNetApiResourcesManager
 {
@@ -46,7 +61,6 @@ public:
 
     std::string authHash() override;
 
-    // Is this need?
     void removeFromPersistentSettings() override;
 
     void checkUpdate(UpdateChannel channel, const std::string &appVersion, const std::string &appBuild,
@@ -57,7 +71,7 @@ public:
 
     std::string sessionStatus() const override;
     std::string portMap() const override;
-    std::string locations() const override;
+    std::shared_ptr<WSNetServerLocations> serverLocations() const override;
     std::string staticIps() const override;
     std::string serverCredentialsOvpn() const override;
     std::string serverCredentialsIkev2() const override;
@@ -83,50 +97,53 @@ private:
 
     std::unique_ptr<SessionStatus> sessionStatus_;
     std::unique_ptr<SessionStatus> prevSessionStatus_;
+
+    // Built from inventoryLocations_ + inventoryServers_; returned to the client.
+    std::shared_ptr<WSNetServerLocations> serverLocations_;
+
+    // Inventory v2 state — kept in sync with persistent settings.
+    std::vector<InventoryLocation> inventoryLocations_;
+    std::map<int, InventoryServer> inventoryServers_;
+    std::int64_t invRevision_ = 0;
+
     std::string checkUpdate_;
 
     std::string pcpidNotifications_;
-
     std::string appleId_;
     std::string gpDeviceId_;
+    std::string authTokenResult_;
 
-    std::string authTokenResult_;    // result from authTokenLogin/authTokenSignup call
-
-    static constexpr int kMinute = 60 * 1000;
-    static constexpr int kHour = 60 * 60 * 1000;
+    static constexpr int kMinute  = 60 * 1000;
+    static constexpr int kHour    = 60 * 60 * 1000;
     static constexpr int k24Hours = 24 * 60 * 60 * 1000;
-
     static constexpr int kDelayBetweenFailedRequests = 1000;
 
-    // update intervals
-    int sessionInDisconnectedStateMs_ = kHour;
-    int sessionInConnectedStateMs_ = kMinute;
-    int locationsMs_ = k24Hours;
-    int staticIpsMs_ = k24Hours;
+    // Update intervals (milliseconds)
+    int sessionInDisconnectedStateMs_  = kHour;
+    int sessionInConnectedStateMs_     = kMinute;
+    int locationsMs_                   = k24Hours;
+    int staticIpsMs_                   = k24Hours;
     int serverConfigsAndCredentialsMs_ = k24Hours;
-    int portMapMs_ = k24Hours;
-    int notificationsMs_ = kHour;
-    int checkUpdateMs_ = k24Hours;
-    int amneziawgUnblockParamsMs_ = k24Hours;
+    int portMapMs_                     = k24Hours;
+    int notificationsMs_               = kHour;
+    int checkUpdateMs_                 = k24Hours;
+    int amneziawgUnblockParamsMs_      = k24Hours;
 
     struct UpdateInfo {
         std::chrono::time_point<std::chrono::steady_clock> updateTime;
         bool isRequestSuccess;
     };
-    std::map<RequestType, UpdateInfo > lastUpdateTimeMs_;
-
-    std::map<RequestType, std::shared_ptr<wsnet::WSNetCancelableCallback> > requestsInProgress_;
+    std::map<RequestType, UpdateInfo> lastUpdateTimeMs_;
+    std::map<RequestType, std::shared_ptr<wsnet::WSNetCancelableCallback>> requestsInProgress_;
 
     bool isLoginOkEmitted_ = false;
 
-    // internal variables for fetchServerCredentials() functionality
     bool isFetchingServerCredentials_ = false;
     bool isOpenVpnCredentialsReceived_;
     bool isIkev2CredentialsReceived_;
     bool isServerConfigsReceived_;
 
-    struct
-    {
+    struct {
         UpdateChannel channel;
         std::string appVersion;
         std::string appBuild;
@@ -140,9 +157,18 @@ private:
     void checkForReadyLogin();
     void checkForServerCredentialsFetchFinished();
 
+    // Rebuild serverLocations_ from current inventoryLocations_ + inventoryServers_.
+    // Returns true if the rebuild produced a non-null result.
+    bool rebuildServerLocations();
+
+    // Apply a server_inventory delta embedded in a session JSON response.
+    // Returns true if the server list actually changed (enables/disables applied).
+    bool applyInventoryDelta(const std::string &sessionJson);
+
     void fetchAll();
     void fetchSession(const std::string &authHash);
-    void fetchLocations();
+    void fetchInventoryLocations();
+    void fetchInventoryServers();
     void fetchStaticIps(const std::string &authHash);
     void fetchServerConfigs(const std::string &authHash);
     void fetchServerCredentialsOpenVpn(const std::string &authHash);
@@ -154,7 +180,7 @@ private:
 
     void updateSessionStatus();
 
-    void onFetchTimer(boost::system::error_code const& err);
+    void onFetchTimer(boost::system::error_code const &err);
 
     void onAuthTokenAnswer(const std::string &username, bool useAsciiCaptcha, wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData, bool isLoginCall);
     void onInitialSessionAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
@@ -167,7 +193,8 @@ private:
                         const std::string &email, const std::string &voucherCode, const std::string &secureToken,
                         const std::string &captchaSolution, const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY);
     void onSessionAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
-    void onServerLocationsAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
+    void onInventoryLocationsAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
+    void onInventoryServersAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
     void onStaticIpsAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
     void onServerConfigsAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
     void onServerCredentialsOpenVpnAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);

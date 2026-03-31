@@ -11,12 +11,14 @@ namespace serverapi_requests_factory
     BaseRequest *login(const std::string &username, const std::string &password, const std::string &code2fa,
                        const std::string &sessionTypeId, const std::string &secureToken, const std::string &captchaSolution,
                        const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY, RequestFinishedCallback callback);
-    BaseRequest *session(const std::string &authHash, const std::string &appleId, const std::string &gpDeviceId, RequestFinishedCallback callback);
+    BaseRequest *session(const std::string &authHash, const std::string &appleId, const std::string &gpDeviceId, std::int64_t invRev, bool backup, RequestFinishedCallback callback);
     BaseRequest *claimVoucherCode(const std::string &authHash, const std::string &voucherCode, RequestFinishedCallback callback);
     BaseRequest *deleteSession(const std::string &authHash, RequestFinishedCallback callback);
     BaseRequest *serverLocations(PersistentSettings &persistentSettings, const std::string &language, const std::string &revision,
                                  bool isPro, const std::vector<std::string> &alcList, ConnectState &connectState, WSNetAdvancedParameters *advancedParameters,
                                  RequestFinishedCallback callback);
+    BaseRequest *getLocations(const std::string &authHash, RequestFinishedCallback callback);
+    BaseRequest *getServers(const std::string &authHash, bool backup, RequestFinishedCallback callback);
     BaseRequest *serverCredentials(const std::string &authHash, bool isOpenVpnProtocol, RequestFinishedCallback callback);
     BaseRequest *serverConfigs(const std::string &authHash, const std::string &ovpnVersion, RequestFinishedCallback callback);
     BaseRequest *portMap(const std::string &authHash, std::uint32_t version, const std::vector<std::string> &forceProtocols, RequestFinishedCallback callback);

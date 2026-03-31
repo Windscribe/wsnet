@@ -8,24 +8,48 @@ namespace wsnet {
 
 using namespace std::chrono;
 
-ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WSNetServerAPI *serverAPI, PersistentSettings &persistentSettings, ConnectState &connectState) :
-    io_context_(io_context),
-    fetchTimer_(io_context, boost::asio::chrono::seconds(1)),
-    serverAPI_(serverAPI),
-    persistentSettings_(persistentSettings),
-    connectState_(connectState)
+// ---------------------------------------------------------------------------
+// Construction / destruction
+// ---------------------------------------------------------------------------
+
+ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WSNetServerAPI *serverAPI,
+                                         PersistentSettings &persistentSettings, ConnectState &connectState)
+    : io_context_(io_context),
+      fetchTimer_(io_context, boost::asio::chrono::seconds(1)),
+      serverAPI_(serverAPI),
+      persistentSettings_(persistentSettings),
+      connectState_(connectState)
 {
     sessionStatus_.reset(SessionStatus::createFromJson(persistentSettings_.sessionStatus()));
+
+    // Restore inventory v2 state from persistent settings.
+    inventoryLocations_ = InventoryParser::parseLocations(persistentSettings_.invLocations());
+
+    if (!persistentSettings_.invServers().empty()) {
+        std::int64_t storedRevision = 0;
+        InventoryParser::deserializeServers(persistentSettings_.invServers(), inventoryServers_, storedRevision);
+        // Prefer the separately stored revision — it stays current even when only an
+        // empty delta arrived (no server data changed) and serializeServers was skipped.
+        invRevision_ = persistentSettings_.invRevision() > 0
+                           ? persistentSettings_.invRevision()
+                           : storedRevision;
+        lastUpdateTimeMs_[RequestType::kInventoryServers] = { steady_clock::now(), true };
+    }
+
+    // Pre-build serverLocations_ from cache so the client has immediate data.
+    rebuildServerLocations();
 }
 
 ApiResourcesManager::~ApiResourcesManager()
 {
     fetchTimer_.cancel();
-
-    for (const auto &it : requestsInProgress_) {
+    for (const auto &it : requestsInProgress_)
         it.second->cancel();
-    }
 }
+
+// ---------------------------------------------------------------------------
+// Public interface
+// ---------------------------------------------------------------------------
 
 std::shared_ptr<WSNetCancelableCallback> ApiResourcesManager::setCallback(WSNetApiResourcesManagerCallback callback)
 {
@@ -33,10 +57,9 @@ std::shared_ptr<WSNetCancelableCallback> ApiResourcesManager::setCallback(WSNetA
     if (callback == nullptr) {
         callback_.reset();
         return nullptr;
-    } else {
-        callback_ = std::make_shared<CancelableCallback<WSNetApiResourcesManagerCallback>>(callback);
-        return callback_;
     }
+    callback_ = std::make_shared<CancelableCallback<WSNetApiResourcesManagerCallback>>(callback);
+    return callback_;
 }
 
 void ApiResourcesManager::setAuthHash(const std::string &authHash)
@@ -49,14 +72,15 @@ bool ApiResourcesManager::isExist() const
 {
     std::lock_guard locker(mutex_);
     return !persistentSettings_.authHash().empty() &&
-            !persistentSettings_.sessionStatus().empty() &&
-            !persistentSettings_.locations().empty() &&
-            !persistentSettings_.serverCredentialsOvpn().empty() &&
-            !persistentSettings_.serverCredentialsIkev2().empty() &&
-            !persistentSettings_.serverConfigs().empty() &&
-            !persistentSettings_.portMap().empty() &&
-            !persistentSettings_.staticIps().empty() &&
-            !persistentSettings_.notifications().empty();
+           !persistentSettings_.sessionStatus().empty() &&
+           !persistentSettings_.invLocations().empty() &&
+           !persistentSettings_.invServers().empty() &&
+           !persistentSettings_.serverCredentialsOvpn().empty() &&
+           !persistentSettings_.serverCredentialsIkev2().empty() &&
+           !persistentSettings_.serverConfigs().empty() &&
+           !persistentSettings_.portMap().empty() &&
+           !persistentSettings_.staticIps().empty() &&
+           !persistentSettings_.notifications().empty();
 }
 
 bool ApiResourcesManager::loginWithAuthHash()
@@ -64,7 +88,7 @@ bool ApiResourcesManager::loginWithAuthHash()
     std::lock_guard locker(mutex_);
 
     if (requestsInProgress_.find(RequestType::kSessionStatus) != requestsInProgress_.end()) {
-        g_logger->error("Incorrect use of API, the function ApiResourcesManager::loginWithAuthHash is called twice");
+        g_logger->error("Incorrect use of API, ApiResourcesManager::loginWithAuthHash called twice");
         assert(false);
     }
 
@@ -72,7 +96,9 @@ bool ApiResourcesManager::loginWithAuthHash()
         return false;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(persistentSettings_.authHash(), appleId_, gpDeviceId_, std::bind(&ApiResourcesManager::onInitialSessionAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(
+        persistentSettings_.authHash(), appleId_, gpDeviceId_, invRevision_, false,
+        std::bind(&ApiResourcesManager::onInitialSessionAnswer, this, _1, _2));
 
     return true;
 }
@@ -81,54 +107,70 @@ void ApiResourcesManager::authTokenLogin(const std::string &username, bool useAs
 {
     std::lock_guard locker(mutex_);
     if (requestsInProgress_.find(RequestType::kAuthToken) != requestsInProgress_.end()) {
-        g_logger->error("Incorrect use of API, the function ApiResourcesManager::authTokenLogin is called twice");
+        g_logger->error("Incorrect use of API, ApiResourcesManager::authTokenLogin called twice");
         assert(false);
     }
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kAuthToken] = serverAPI_->authTokenLogin(username, useAsciiCaptcha, std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, true));
+    requestsInProgress_[RequestType::kAuthToken] = serverAPI_->authTokenLogin(
+        username, useAsciiCaptcha,
+        std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, true));
 }
 
 void ApiResourcesManager::authTokenSignup(const std::string &username, bool useAsciiCaptcha)
 {
     std::lock_guard locker(mutex_);
     if (requestsInProgress_.find(RequestType::kAuthToken) != requestsInProgress_.end()) {
-        g_logger->error("Incorrect use of API, the function ApiResourcesManager::authTokenSignup is called twice");
+        g_logger->error("Incorrect use of API, ApiResourcesManager::authTokenSignup called twice");
         assert(false);
     }
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kAuthToken] = serverAPI_->authTokenSignup(username, useAsciiCaptcha, std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, false));
+    requestsInProgress_[RequestType::kAuthToken] = serverAPI_->authTokenSignup(
+        username, useAsciiCaptcha,
+        std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, false));
 }
 
-void ApiResourcesManager::login(const std::string &username, const std::string &password, const std::string &code2fa, const std::string &secureToken,
-                                const std::string &captchaSolution, const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY)
+void ApiResourcesManager::login(const std::string &username, const std::string &password,
+                                const std::string &code2fa, const std::string &secureToken,
+                                const std::string &captchaSolution,
+                                const std::vector<float> &captchaTrailX,
+                                const std::vector<float> &captchaTrailY)
 {
     std::lock_guard locker(mutex_);
 
     if (requestsInProgress_.find(RequestType::kSessionStatus) != requestsInProgress_.end()) {
-        g_logger->error("Incorrect use of API, the function ApiResourcesManager::login is called twice");
+        g_logger->error("Incorrect use of API, ApiResourcesManager::login called twice");
         assert(false);
     }
 
     using namespace std::placeholders;
-        requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->login(username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY,
-                                                                         std::bind(&ApiResourcesManager::onLoginAnswer, this, _1, _2, username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY));
+    requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->login(
+        username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY,
+        std::bind(&ApiResourcesManager::onLoginAnswer, this, _1, _2,
+                  username, password, code2fa, secureToken,
+                  captchaSolution, captchaTrailX, captchaTrailY));
 }
 
-void ApiResourcesManager::signup(const std::string &username, const std::string &password, const std::string &referringUsername,
-                                  const std::string &email, const std::string &voucherCode,
-                                  const std::string &secureToken,
-                                  const std::string &captchaSolution, const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY)
+void ApiResourcesManager::signup(const std::string &username, const std::string &password,
+                                  const std::string &referringUsername, const std::string &email,
+                                  const std::string &voucherCode, const std::string &secureToken,
+                                  const std::string &captchaSolution,
+                                  const std::vector<float> &captchaTrailX,
+                                  const std::vector<float> &captchaTrailY)
 {
     std::lock_guard locker(mutex_);
 
     if (requestsInProgress_.find(RequestType::kSessionStatus) != requestsInProgress_.end()) {
-        g_logger->error("Incorrect use of API, the function ApiResourcesManager::signup is called twice");
+        g_logger->error("Incorrect use of API, ApiResourcesManager::signup called twice");
         assert(false);
     }
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->signup(username, password, referringUsername, email, voucherCode, secureToken, captchaSolution, captchaTrailX, captchaTrailY,
-                                                                           std::bind(&ApiResourcesManager::onSignupAnswer, this, _1, _2, username, password, referringUsername, email, voucherCode, secureToken, captchaSolution, captchaTrailX, captchaTrailY));
+    requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->signup(
+        username, password, referringUsername, email, voucherCode, secureToken,
+        captchaSolution, captchaTrailX, captchaTrailY,
+        std::bind(&ApiResourcesManager::onSignupAnswer, this, _1, _2,
+                  username, password, referringUsername, email, voucherCode, secureToken,
+                  captchaSolution, captchaTrailX, captchaTrailY));
 }
 
 void ApiResourcesManager::logout()
@@ -137,7 +179,8 @@ void ApiResourcesManager::logout()
     fetchTimer_.cancel();
 
     using namespace std::placeholders;
-    serverAPI_->deleteSession(persistentSettings_.authHash(), std::bind(&ApiResourcesManager::onDeleteSessionAnswer, this, _1, _2));
+    serverAPI_->deleteSession(persistentSettings_.authHash(),
+                              std::bind(&ApiResourcesManager::onDeleteSessionAnswer, this, _1, _2));
     clearValues();
 }
 
@@ -153,8 +196,8 @@ void ApiResourcesManager::fetchServerCredentials()
     assert(!isFetchingServerCredentials_);
     isFetchingServerCredentials_ = true;
     isOpenVpnCredentialsReceived_ = false;
-    isIkev2CredentialsReceived_ = false;
-    isServerConfigsReceived_ = false;
+    isIkev2CredentialsReceived_   = false;
+    isServerConfigsReceived_      = false;
 
     lastUpdateTimeMs_.erase(RequestType::kServerCredentialsOpenVPN);
     lastUpdateTimeMs_.erase(RequestType::kServerCredentialsIkev2);
@@ -177,14 +220,16 @@ void ApiResourcesManager::removeFromPersistentSettings()
     clearValues();
 }
 
-void ApiResourcesManager::checkUpdate(UpdateChannel channel, const std::string &appVersion, const std::string &appBuild, const std::string &osVersion, const std::string &osBuild)
+void ApiResourcesManager::checkUpdate(UpdateChannel channel, const std::string &appVersion,
+                                       const std::string &appBuild, const std::string &osVersion,
+                                       const std::string &osBuild)
 {
     std::lock_guard locker(mutex_);
-    checkUpdateData_.channel = channel;
+    checkUpdateData_.channel    = channel;
     checkUpdateData_.appVersion = appVersion;
-    checkUpdateData_.appBuild = appBuild;
-    checkUpdateData_.osVersion = osVersion;
-    checkUpdateData_.osBuild = osBuild;
+    checkUpdateData_.appBuild   = appBuild;
+    checkUpdateData_.osVersion  = osVersion;
+    checkUpdateData_.osBuild    = osBuild;
     lastUpdateTimeMs_.erase(RequestType::kCheckUpdate);
     isCheckUpdateDataSet_ = true;
 }
@@ -198,59 +243,29 @@ void ApiResourcesManager::setNotificationPcpid(const std::string &pcpid)
 void ApiResourcesManager::setMobileDeviceId(const std::string &appleId, const std::string &gpDeviceId)
 {
     std::lock_guard locker(mutex_);
-    appleId_ = appleId;
+    appleId_    = appleId;
     gpDeviceId_ = gpDeviceId;
 }
 
-std::string ApiResourcesManager::sessionStatus() const
-{
-    return persistentSettings_.sessionStatus();
-}
+std::string ApiResourcesManager::sessionStatus() const  { return persistentSettings_.sessionStatus(); }
+std::string ApiResourcesManager::portMap() const         { return persistentSettings_.portMap(); }
+std::string ApiResourcesManager::staticIps() const       { return persistentSettings_.staticIps(); }
+std::string ApiResourcesManager::serverCredentialsOvpn() const  { return persistentSettings_.serverCredentialsOvpn(); }
+std::string ApiResourcesManager::serverCredentialsIkev2() const { return persistentSettings_.serverCredentialsIkev2(); }
+std::string ApiResourcesManager::serverConfigs() const   { return persistentSettings_.serverConfigs(); }
+std::string ApiResourcesManager::notifications() const   { return persistentSettings_.notifications(); }
+std::string ApiResourcesManager::amneziawgUnblockParams() const { return persistentSettings_.amneziawgUnblockParams(); }
 
-std::string ApiResourcesManager::portMap() const
+std::shared_ptr<WSNetServerLocations> ApiResourcesManager::serverLocations() const
 {
-    return persistentSettings_.portMap();
-}
-
-std::string ApiResourcesManager::locations() const
-{
-    return persistentSettings_.locations();
-}
-
-std::string ApiResourcesManager::staticIps() const
-{
-    return persistentSettings_.staticIps();
-}
-
-std::string ApiResourcesManager::serverCredentialsOvpn() const
-{
-    return persistentSettings_.serverCredentialsOvpn();
-}
-
-std::string ApiResourcesManager::serverCredentialsIkev2() const
-{
-    return persistentSettings_.serverCredentialsIkev2();
-}
-
-std::string ApiResourcesManager::serverConfigs() const
-{
-    return persistentSettings_.serverConfigs();
-}
-
-std::string ApiResourcesManager::notifications() const
-{
-    return persistentSettings_.notifications();
+    std::lock_guard locker(mutex_);
+    return serverLocations_;
 }
 
 std::string ApiResourcesManager::checkUpdate() const
 {
     std::lock_guard locker(mutex_);
     return checkUpdate_;
-}
-
-std::string ApiResourcesManager::amneziawgUnblockParams() const
-{
-    return persistentSettings_.amneziawgUnblockParams();
 }
 
 std::string ApiResourcesManager::authTokenResult() const
@@ -260,39 +275,96 @@ std::string ApiResourcesManager::authTokenResult() const
 }
 
 void ApiResourcesManager::setUpdateIntervals(int sessionInDisconnectedStateMs, int sessionInConnectedStateMs,
-                                             int locationsMs, int staticIpsMs, int serverConfigsAndCredentialsMs,
-                                             int portMapMs, int notificationsMs, int checkUpdateMs, int amneziawgUnblockParamsMs)
+                                              int locationsMs, int staticIpsMs, int serverConfigsAndCredentialsMs,
+                                              int portMapMs, int notificationsMs, int checkUpdateMs,
+                                              int amneziawgUnblockParamsMs)
 {
     std::lock_guard locker(mutex_);
-    sessionInDisconnectedStateMs_ = sessionInDisconnectedStateMs;
-    sessionInConnectedStateMs_ = sessionInConnectedStateMs;
-    locationsMs_ = locationsMs;
-    staticIpsMs_ = staticIpsMs;
+    sessionInDisconnectedStateMs_  = sessionInDisconnectedStateMs;
+    sessionInConnectedStateMs_     = sessionInConnectedStateMs;
+    locationsMs_                   = locationsMs;
+    staticIpsMs_                   = staticIpsMs;
     serverConfigsAndCredentialsMs_ = serverConfigsAndCredentialsMs;
-    portMapMs_ = portMapMs;
-    notificationsMs_ = notificationsMs;
-    checkUpdateMs_ = checkUpdateMs;
-    amneziawgUnblockParamsMs_ = amneziawgUnblockParamsMs;
+    portMapMs_                     = portMapMs;
+    notificationsMs_               = notificationsMs;
+    checkUpdateMs_                 = checkUpdateMs;
+    amneziawgUnblockParamsMs_      = amneziawgUnblockParamsMs;
 }
 
-void ApiResourcesManager::handleLoginOrSessionAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+bool ApiResourcesManager::rebuildServerLocations()
 {
-    if (serverApiRetCode == ServerApiRetCode::kSuccess)  {
+    if (inventoryLocations_.empty() || inventoryServers_.empty())
+        return false;
+    serverLocations_ = InventoryParser::buildServerLocations(inventoryLocations_, inventoryServers_);
+    return serverLocations_ != nullptr;
+}
+
+bool ApiResourcesManager::applyInventoryDelta(const std::string &sessionJson)
+{
+    ServerInventoryDelta delta = InventoryParser::parseDelta(sessionJson);
+
+    if (delta.action == ServerInventoryDelta::Action::kNone)
+        return false;
+
+    if (delta.action == ServerInventoryDelta::Action::kHold) {
+        g_logger->info("ApiResourcesManager: server_inventory hold, keeping revision {}", invRevision_);
+        return false;
+    }
+
+    // action == kDelta
+    bool changed = !delta.enabled.empty() || !delta.disabled.empty();
+
+    for (const auto &srv : delta.enabled)
+        inventoryServers_[srv.id] = srv;
+
+    for (int id : delta.disabled)
+        inventoryServers_.erase(id);
+
+    invRevision_ = delta.revision;
+    // Always persist the new revision cheaply as a bare integer.
+    persistentSettings_.setInvRevision(invRevision_);
+
+    if (changed) {
+        // Re-serialize the full server map only when its contents actually changed.
+        persistentSettings_.setInvServers(
+            InventoryParser::serializeServers(inventoryServers_, invRevision_));
+
+        if (!inventoryLocations_.empty()) {
+            serverLocations_ = InventoryParser::buildServerLocations(inventoryLocations_, inventoryServers_);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void ApiResourcesManager::handleLoginOrSessionAnswer(ServerApiRetCode serverApiRetCode,
+                                                      const std::string &jsonData)
+{
+    if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         std::unique_ptr<SessionStatus> ss(SessionStatus::createFromJson(jsonData));
         if (ss) {
             if (ss->errorCode() == SessionErrorCode::kSuccess) {
                 sessionStatus_ = std::move(ss);
                 persistentSettings_.setSessionStatus(jsonData);
-                if (!sessionStatus_->authHash().empty()) {
+                if (!sessionStatus_->authHash().empty())
                     persistentSettings_.setAuthHash(sessionStatus_->authHash());
-                }
+
                 lastUpdateTimeMs_[RequestType::kSessionStatus] = { steady_clock::now(), true };
+
+                // Apply any inventory delta embedded in the login/session response.
+                applyInventoryDelta(jsonData);
+
                 updateSessionStatus();
                 checkForReadyLogin();
                 fetchAll();
 
-                // start the update timer
-                fetchTimer_.async_wait(std::bind(&ApiResourcesManager::onFetchTimer, this, std::placeholders::_1));
+                fetchTimer_.async_wait(
+                    std::bind(&ApiResourcesManager::onFetchTimer, this, std::placeholders::_1));
 
             } else if (ss->errorCode() == SessionErrorCode::kBadUsername) {
                 callback_->call(ApiResourcesManagerNotification::kLoginFailed, LoginResult::kBadUsername, ss->errorMessage());
@@ -302,7 +374,6 @@ void ApiResourcesManager::handleLoginOrSessionAnswer(ServerApiRetCode serverApiR
                 callback_->call(ApiResourcesManagerNotification::kLoginFailed, LoginResult::kBadCode2fa, ss->errorMessage());
             } else if (ss->errorCode() == SessionErrorCode::kAccountDisabled) {
                 callback_->call(ApiResourcesManagerNotification::kLoginFailed, LoginResult::kAccountDisabled, ss->errorMessage());
-
             } else if (ss->errorCode() == SessionErrorCode::kSessionInvalid) {
                 callback_->call(ApiResourcesManagerNotification::kLoginFailed, LoginResult::kSessionInvalid, ss->errorMessage());
             } else if (ss->errorCode() == SessionErrorCode::kRateLimited) {
@@ -333,14 +404,15 @@ void ApiResourcesManager::checkForReadyLogin()
 {
     if (!persistentSettings_.authHash().empty() &&
         !persistentSettings_.sessionStatus().empty() &&
-        !persistentSettings_.locations().empty() &&
+        !persistentSettings_.invLocations().empty() &&
+        !persistentSettings_.invServers().empty() &&
         !persistentSettings_.serverCredentialsOvpn().empty() &&
         !persistentSettings_.serverCredentialsIkev2().empty() &&
         !persistentSettings_.serverConfigs().empty() &&
         !persistentSettings_.portMap().empty() &&
         !persistentSettings_.staticIps().empty() &&
-        !persistentSettings_.notifications().empty()) {
-
+        !persistentSettings_.notifications().empty())
+    {
         if (!isLoginOkEmitted_) {
             isLoginOkEmitted_ = true;
             callback_->call(ApiResourcesManagerNotification::kLoginOk, LoginResult::kSuccess, std::string());
@@ -350,59 +422,66 @@ void ApiResourcesManager::checkForReadyLogin()
 
 void ApiResourcesManager::checkForServerCredentialsFetchFinished()
 {
-    if (isFetchingServerCredentials_ && isOpenVpnCredentialsReceived_ && isIkev2CredentialsReceived_ && isServerConfigsReceived_) {
+    if (isFetchingServerCredentials_ &&
+        isOpenVpnCredentialsReceived_ &&
+        isIkev2CredentialsReceived_ &&
+        isServerConfigsReceived_)
+    {
         isFetchingServerCredentials_ = false;
         callback_->call(ApiResourcesManagerNotification::kServerCredentialsUpdated, LoginResult::kSuccess, std::string());
     }
 }
 
+// ---------------------------------------------------------------------------
+// Scheduling
+// ---------------------------------------------------------------------------
+
 void ApiResourcesManager::fetchAll()
 {
-    // fetch session
+    // Session — with current inv_rev for delta delivery.
     if (connectState_.isVPNConnected()) {
-        // every 1 min in the connected state
         if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInConnectedStateMs_))
             fetchSession(persistentSettings_.authHash());
     } else {
-        // every 1 hour in the disconnected state
         if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInDisconnectedStateMs_))
             fetchSession(persistentSettings_.authHash());
     }
 
-    // fetch locations every 24 hours
-    if (isTimeoutForRequest(RequestType::kLocations, locationsMs_))
-        fetchLocations();
+    // Inventory locations — infrequently changing metadata (countries / datacenters), every 24h
+    if (isTimeoutForRequest(RequestType::kInventoryLocations, locationsMs_))
+        fetchInventoryLocations();
 
-    // fetch static ips every 24 hours
+    // Full server list — safety fallback; delta updates arrive via session polls, every 24h and on the first start
+    if (isTimeoutForRequest(RequestType::kInventoryServers, locationsMs_))
+        fetchInventoryServers();
+
+    // Static IPs every 24h.
     if (isTimeoutForRequest(RequestType::kStaticIps, staticIpsMs_))
         fetchStaticIps(persistentSettings_.authHash());
 
-    // fetch server configs every 24 hours
+    // Server configs + credentials every 24h.
     if (isTimeoutForRequest(RequestType::kServerConfigs, serverConfigsAndCredentialsMs_))
         fetchServerConfigs(persistentSettings_.authHash());
-
-    // fetch server credentials every 24 hours
     if (isTimeoutForRequest(RequestType::kServerCredentialsOpenVPN, serverConfigsAndCredentialsMs_))
         fetchServerCredentialsOpenVpn(persistentSettings_.authHash());
     if (isTimeoutForRequest(RequestType::kServerCredentialsIkev2, serverConfigsAndCredentialsMs_))
         fetchServerCredentialsIkev2(persistentSettings_.authHash());
 
-    // fetch portmap every 24 hours
+    // Port map every 24h.
     if (isTimeoutForRequest(RequestType::kPortMap, portMapMs_))
         fetchPortMap(persistentSettings_.authHash());
 
-    // fetch notifications every 1 hour
+    // Notifications every 1h.
     if (isTimeoutForRequest(RequestType::kNotifications, notificationsMs_))
         fetchNotifications(persistentSettings_.authHash());
 
-    // fetch updates every 24 hour
+    // Check update every 24h.
     if (isCheckUpdateDataSet_ && isTimeoutForRequest(RequestType::kCheckUpdate, checkUpdateMs_))
         fetchCheckUpdate();
 
-    // fetch amneziawg unblock params every 24 hours
+    // AmneziaWG unblock params every 24h.
     if (isTimeoutForRequest(RequestType::kAmneziawgUnblockParams, amneziawgUnblockParamsMs_))
         fetchAmneziawgUnblockParams(persistentSettings_.authHash());
-
 }
 
 void ApiResourcesManager::fetchSession(const std::string &authHash)
@@ -411,17 +490,31 @@ void ApiResourcesManager::fetchSession(const std::string &authHash)
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(authHash, appleId_, gpDeviceId_, std::bind(&ApiResourcesManager::onSessionAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(
+        authHash, appleId_, gpDeviceId_, invRevision_, false,
+        std::bind(&ApiResourcesManager::onSessionAnswer, this, _1, _2));
 }
 
-void ApiResourcesManager::fetchLocations()
+void ApiResourcesManager::fetchInventoryLocations()
 {
-    if (requestsInProgress_.find(RequestType::kLocations) != requestsInProgress_.end())
+    if (requestsInProgress_.find(RequestType::kInventoryLocations) != requestsInProgress_.end())
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kLocations] = serverAPI_->serverLocations("en", sessionStatus_->revisionHash(), sessionStatus_->isPremium(), sessionStatus_->alcList(),
-                                                                               std::bind(&ApiResourcesManager::onServerLocationsAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kInventoryLocations] = serverAPI_->getLocations(
+        persistentSettings_.authHash(),
+        std::bind(&ApiResourcesManager::onInventoryLocationsAnswer, this, _1, _2));
+}
+
+void ApiResourcesManager::fetchInventoryServers()
+{
+    if (requestsInProgress_.find(RequestType::kInventoryServers) != requestsInProgress_.end())
+        return;
+
+    using namespace std::placeholders;
+    requestsInProgress_[RequestType::kInventoryServers] = serverAPI_->getServers(
+        persistentSettings_.authHash(), false,
+        std::bind(&ApiResourcesManager::onInventoryServersAnswer, this, _1, _2));
 }
 
 void ApiResourcesManager::fetchStaticIps(const std::string &authHash)
@@ -430,15 +523,13 @@ void ApiResourcesManager::fetchStaticIps(const std::string &authHash)
         return;
 
     if (sessionStatus_->staticIpsCount() > 0) {
-
         using namespace std::placeholders;
-        requestsInProgress_[RequestType::kStaticIps] = serverAPI_->staticIps(authHash, 2, std::bind(&ApiResourcesManager::onStaticIpsAnswer, this, _1, _2));
+        requestsInProgress_[RequestType::kStaticIps] = serverAPI_->staticIps(
+            authHash, 2,
+            std::bind(&ApiResourcesManager::onStaticIpsAnswer, this, _1, _2));
     } else {
-        // We can't use an empty string because the initialization logic relies on comparison with the empty string
-        // So use empty json object
         persistentSettings_.setStaticIps("{}");
         lastUpdateTimeMs_[RequestType::kStaticIps] = { steady_clock::now(), true };
-        checkForReadyLogin();
         if (isLoginOkEmitted_)
             callback_->call(ApiResourcesManagerNotification::kStaticIpsUpdated, LoginResult::kSuccess, std::string());
         else
@@ -452,8 +543,8 @@ void ApiResourcesManager::fetchServerConfigs(const std::string &authHash)
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kServerConfigs] = serverAPI_->serverConfigs(authHash,
-                                                                                 std::bind(&ApiResourcesManager::onServerConfigsAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kServerConfigs] = serverAPI_->serverConfigs(
+        authHash, std::bind(&ApiResourcesManager::onServerConfigsAnswer, this, _1, _2));
 }
 
 void ApiResourcesManager::fetchServerCredentialsOpenVpn(const std::string &authHash)
@@ -462,8 +553,9 @@ void ApiResourcesManager::fetchServerCredentialsOpenVpn(const std::string &authH
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kServerCredentialsOpenVPN] = serverAPI_->serverCredentials(authHash, true,
-                                                                     std::bind(&ApiResourcesManager::onServerCredentialsOpenVpnAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kServerCredentialsOpenVPN] = serverAPI_->serverCredentials(
+        authHash, true,
+        std::bind(&ApiResourcesManager::onServerCredentialsOpenVpnAnswer, this, _1, _2));
 }
 
 void ApiResourcesManager::fetchServerCredentialsIkev2(const std::string &authHash)
@@ -472,9 +564,9 @@ void ApiResourcesManager::fetchServerCredentialsIkev2(const std::string &authHas
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kServerCredentialsIkev2] = serverAPI_->serverCredentials(authHash, false,
-                                                                    std::bind(&ApiResourcesManager::onServerCredentialsIkev2Answer, this, _1, _2));
-
+    requestsInProgress_[RequestType::kServerCredentialsIkev2] = serverAPI_->serverCredentials(
+        authHash, false,
+        std::bind(&ApiResourcesManager::onServerCredentialsIkev2Answer, this, _1, _2));
 }
 
 void ApiResourcesManager::fetchPortMap(const std::string &authHash)
@@ -483,8 +575,9 @@ void ApiResourcesManager::fetchPortMap(const std::string &authHash)
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kPortMap] = serverAPI_->portMap(authHash, 6, std::vector<std::string>(),
-                                                                     std::bind(&ApiResourcesManager::onPortMapAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kPortMap] = serverAPI_->portMap(
+        authHash, 6, std::vector<std::string>(),
+        std::bind(&ApiResourcesManager::onPortMapAnswer, this, _1, _2));
 }
 
 void ApiResourcesManager::fetchNotifications(const std::string &authHash)
@@ -493,8 +586,9 @@ void ApiResourcesManager::fetchNotifications(const std::string &authHash)
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kNotifications] = serverAPI_->notifications(authHash, pcpidNotifications_,
-                                                                                 std::bind(&ApiResourcesManager::onNotificationsAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kNotifications] = serverAPI_->notifications(
+        authHash, pcpidNotifications_,
+        std::bind(&ApiResourcesManager::onNotificationsAnswer, this, _1, _2));
 }
 
 void ApiResourcesManager::fetchCheckUpdate()
@@ -503,9 +597,10 @@ void ApiResourcesManager::fetchCheckUpdate()
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kCheckUpdate] = serverAPI_->checkUpdate(checkUpdateData_.channel, checkUpdateData_.appVersion, checkUpdateData_.appBuild,
-                                                                               checkUpdateData_.osVersion, checkUpdateData_.osBuild,
-                                                                                 std::bind(&ApiResourcesManager::onCheckUpdateAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kCheckUpdate] = serverAPI_->checkUpdate(
+        checkUpdateData_.channel, checkUpdateData_.appVersion, checkUpdateData_.appBuild,
+        checkUpdateData_.osVersion, checkUpdateData_.osBuild,
+        std::bind(&ApiResourcesManager::onCheckUpdateAnswer, this, _1, _2));
 }
 
 void ApiResourcesManager::fetchAmneziawgUnblockParams(const std::string &authHash)
@@ -514,51 +609,62 @@ void ApiResourcesManager::fetchAmneziawgUnblockParams(const std::string &authHas
         return;
 
     using namespace std::placeholders;
-    requestsInProgress_[RequestType::kAmneziawgUnblockParams] =
-        serverAPI_->amneziawgUnblockParams(authHash, std::bind(&ApiResourcesManager::onAmneziawgUnblockParamsAnswer, this, _1, _2));
+    requestsInProgress_[RequestType::kAmneziawgUnblockParams] = serverAPI_->amneziawgUnblockParams(
+        authHash, std::bind(&ApiResourcesManager::onAmneziawgUnblockParamsAnswer, this, _1, _2));
 }
+
+// ---------------------------------------------------------------------------
+// Session status change handling
+// ---------------------------------------------------------------------------
 
 void ApiResourcesManager::updateSessionStatus()
 {
     assert(sessionStatus_);
 
     if (prevSessionStatus_) {
-
-        if (prevSessionStatus_->isPremium() != sessionStatus_->isPremium() ||
-            prevSessionStatus_->status() != sessionStatus_->status() ||
-            prevSessionStatus_->rebill() != sessionStatus_->rebill() ||
-            prevSessionStatus_->billingPlanId() != sessionStatus_->billingPlanId() ||
+        if (prevSessionStatus_->isPremium()          != sessionStatus_->isPremium()         ||
+            prevSessionStatus_->status()             != sessionStatus_->status()             ||
+            prevSessionStatus_->rebill()             != sessionStatus_->rebill()             ||
+            prevSessionStatus_->billingPlanId()      != sessionStatus_->billingPlanId()      ||
             prevSessionStatus_->premiumExpiredDate() != sessionStatus_->premiumExpiredDate() ||
-            prevSessionStatus_->trafficMax() != sessionStatus_->trafficMax() ||
-            prevSessionStatus_->username() != sessionStatus_->username() ||
-            prevSessionStatus_->userId() != sessionStatus_->userId() ||
-            prevSessionStatus_->email() != sessionStatus_->email() ||
-            prevSessionStatus_->emailStatus() != sessionStatus_->emailStatus() ||
-            prevSessionStatus_->staticIpsCount() != sessionStatus_->staticIpsCount() ||
-            prevSessionStatus_->alcList() != sessionStatus_->alcList() ||
-            prevSessionStatus_->lastResetDate() != sessionStatus_->lastResetDate())
+            prevSessionStatus_->trafficMax()         != sessionStatus_->trafficMax()         ||
+            prevSessionStatus_->username()           != sessionStatus_->username()           ||
+            prevSessionStatus_->userId()             != sessionStatus_->userId()             ||
+            prevSessionStatus_->email()              != sessionStatus_->email()              ||
+            prevSessionStatus_->emailStatus()        != sessionStatus_->emailStatus()        ||
+            prevSessionStatus_->staticIpsCount()     != sessionStatus_->staticIpsCount()     ||
+            prevSessionStatus_->alcList()            != sessionStatus_->alcList()            ||
+            prevSessionStatus_->lastResetDate()      != sessionStatus_->lastResetDate())
         {
             g_logger->info("update session status (changed since last call)");
             sessionStatus_->debugLog();
         }
 
-
-        if (prevSessionStatus_->revisionHash() != sessionStatus_->revisionHash() || prevSessionStatus_->isPremium() != sessionStatus_->isPremium() ||
+        // Force a full server list refresh whenever the user's entitlement changes.
+        // The delta system only covers changes within the user's current scope,
+        // so a plan change requires a fresh full list.
+        if (prevSessionStatus_->revisionHash()  != sessionStatus_->revisionHash()  ||
+            prevSessionStatus_->isPremium()     != sessionStatus_->isPremium()     ||
             prevSessionStatus_->billingPlanId() != sessionStatus_->billingPlanId() ||
-            prevSessionStatus_->alcList() != sessionStatus_->alcList() || (prevSessionStatus_->status() != 1 && sessionStatus_->status() == 1)) {
-
-            fetchLocations();
+            prevSessionStatus_->alcList()       != sessionStatus_->alcList()       ||
+            (prevSessionStatus_->status() != 1 && sessionStatus_->status() == 1))
+        {
+            fetchInventoryLocations();
+            fetchInventoryServers();
         }
 
-        if (prevSessionStatus_->revisionHash() != sessionStatus_->revisionHash() || prevSessionStatus_->staticIpsCount() != sessionStatus_->staticIpsCount() ||
-            sessionStatus_->isContainsStaticDeviceId(Settings::instance().deviceId()) ||
-            prevSessionStatus_->isPremium() != sessionStatus_->isPremium() ||
-            prevSessionStatus_->billingPlanId() != sessionStatus_->billingPlanId()) {
-
+        if (prevSessionStatus_->revisionHash()    != sessionStatus_->revisionHash()    ||
+            prevSessionStatus_->staticIpsCount()  != sessionStatus_->staticIpsCount()  ||
+            sessionStatus_->isContainsStaticDeviceId(Settings::instance().deviceId())  ||
+            prevSessionStatus_->isPremium()       != sessionStatus_->isPremium()       ||
+            prevSessionStatus_->billingPlanId()   != sessionStatus_->billingPlanId())
+        {
             fetchStaticIps(persistentSettings_.authHash());
         }
 
-        if (prevSessionStatus_->isPremium() != sessionStatus_->isPremium() || prevSessionStatus_->billingPlanId() != sessionStatus_->billingPlanId())  {
+        if (prevSessionStatus_->isPremium()     != sessionStatus_->isPremium()     ||
+            prevSessionStatus_->billingPlanId() != sessionStatus_->billingPlanId())
+        {
             fetchServerCredentialsOpenVpn(persistentSettings_.authHash());
             fetchServerCredentialsIkev2(persistentSettings_.authHash());
             fetchNotifications(persistentSettings_.authHash());
@@ -578,37 +684,42 @@ void ApiResourcesManager::updateSessionStatus()
         callback_->call(ApiResourcesManagerNotification::kSessionUpdated, LoginResult::kSuccess, std::string());
 }
 
+// ---------------------------------------------------------------------------
+// Timer
+// ---------------------------------------------------------------------------
+
 void ApiResourcesManager::onFetchTimer(const boost::system::error_code &err)
 {
-    if (err)
-        return;
+    if (err) return;
 
     std::lock_guard locker(mutex_);
 
     if (!persistentSettings_.authHash().empty()) {
         fetchAll();
-    } else  {
-        g_logger->error("ApiResourcesManager::onFetchTimer, authHash is empty although it shouldn't");
+    } else {
+        g_logger->error("ApiResourcesManager::onFetchTimer: authHash is empty");
         assert(false);
     }
 
-    // repeat the update timer
     fetchTimer_.expires_after(boost::asio::chrono::seconds(1));
     fetchTimer_.async_wait(std::bind(&ApiResourcesManager::onFetchTimer, this, std::placeholders::_1));
 }
 
-void ApiResourcesManager::onAuthTokenAnswer(const std::string &username, bool useAsciiCaptcha, ServerApiRetCode serverApiRetCode, const std::string &jsonData, bool isLoginCall)
+// ---------------------------------------------------------------------------
+// Callbacks
+// ---------------------------------------------------------------------------
+
+void ApiResourcesManager::onAuthTokenAnswer(const std::string &username, bool useAsciiCaptcha,
+                                             ServerApiRetCode serverApiRetCode,
+                                             const std::string &jsonData, bool isLoginCall)
 {
     std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kAuthToken);
+
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        // repeat the request
         boost::asio::post(io_context_, [this, username, useAsciiCaptcha, isLoginCall] {
-            if (isLoginCall) {
-                authTokenLogin(username, useAsciiCaptcha);
-            } else {
-                authTokenSignup(username, useAsciiCaptcha);
-            }
+            if (isLoginCall) authTokenLogin(username, useAsciiCaptcha);
+            else             authTokenSignup(username, useAsciiCaptcha);
         });
     } else if (serverApiRetCode == ServerApiRetCode::kNoNetworkConnection) {
         callback_->call(ApiResourcesManagerNotification::kAuthTokenFinished, LoginResult::kNoConnectivity, std::string());
@@ -617,74 +728,69 @@ void ApiResourcesManager::onAuthTokenAnswer(const std::string &username, bool us
     } else if (serverApiRetCode == ServerApiRetCode::kFailoverFailed) {
         callback_->call(ApiResourcesManagerNotification::kAuthTokenFinished, LoginResult::kNoApiConnectivity, std::string());
     } else {
-        if (serverApiRetCode == ServerApiRetCode::kSuccess) {
-            authTokenResult_ = jsonData;
-        } else {
-            authTokenResult_.clear();
-        }
+        authTokenResult_ = (serverApiRetCode == ServerApiRetCode::kSuccess) ? jsonData : std::string();
         callback_->call(ApiResourcesManagerNotification::kAuthTokenFinished, LoginResult::kSuccess, std::string());
     }
 }
 
-void ApiResourcesManager::onInitialSessionAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
+void ApiResourcesManager::onInitialSessionAnswer(ServerApiRetCode serverApiRetCode,
+                                                  const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kSessionStatus);
 
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        // repeat the request in 1 sec
         auto timer = std::make_shared<boost::asio::steady_timer>(io_context_);
         timer->expires_after(std::chrono::seconds(1));
-        timer->async_wait(
-            [this, timer](const boost::system::error_code& ec) {
-                if (!ec) {
-                    loginWithAuthHash();
-                }
-            }
-        );
+        timer->async_wait([this, timer](const boost::system::error_code &ec) {
+            if (!ec) loginWithAuthHash();
+        });
     } else {
         handleLoginOrSessionAnswer(serverApiRetCode, jsonData);
     }
 }
 
-void ApiResourcesManager::onLoginAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData, const std::string &username, const std::string &password, const std::string &code2fa, const std::string &secureToken,
-                                        const std::string &captchaSolution, const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY)
+void ApiResourcesManager::onLoginAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData,
+                                         const std::string &username, const std::string &password,
+                                         const std::string &code2fa, const std::string &secureToken,
+                                         const std::string &captchaSolution,
+                                         const std::vector<float> &captchaTrailX,
+                                         const std::vector<float> &captchaTrailY)
 {
     std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kSessionStatus);
+
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        // repeat the request in 1 sec
         auto timer = std::make_shared<boost::asio::steady_timer>(io_context_);
         timer->expires_after(std::chrono::seconds(1));
-        timer->async_wait(
-            [this, timer, username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY](const boost::system::error_code& ec) {
-                if (!ec) {
-                    login(username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY);
-                }
-            }
-        );
+        timer->async_wait([this, timer, username, password, code2fa, secureToken,
+                           captchaSolution, captchaTrailX, captchaTrailY](const boost::system::error_code &ec) {
+            if (!ec) login(username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY);
+        });
     } else {
         handleLoginOrSessionAnswer(serverApiRetCode, jsonData);
     }
 }
 
-void ApiResourcesManager::onSignupAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData, const std::string &username, const std::string &password, const std::string &referringUsername,
-                                         const std::string &email, const std::string &voucherCode, const std::string &secureToken,
-                                         const std::string &captchaSolution, const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY)
+void ApiResourcesManager::onSignupAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData,
+                                          const std::string &username, const std::string &password,
+                                          const std::string &referringUsername, const std::string &email,
+                                          const std::string &voucherCode, const std::string &secureToken,
+                                          const std::string &captchaSolution,
+                                          const std::vector<float> &captchaTrailX,
+                                          const std::vector<float> &captchaTrailY)
 {
     std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kSessionStatus);
+
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        // repeat the request in 1 sec
         auto timer = std::make_shared<boost::asio::steady_timer>(io_context_);
         timer->expires_after(std::chrono::seconds(1));
-        timer->async_wait(
-            [this, timer, username, password, referringUsername, email, voucherCode, secureToken, captchaSolution, captchaTrailX, captchaTrailY](const boost::system::error_code& ec) {
-                if (!ec) {
-                    signup(username, password, referringUsername, email, voucherCode, secureToken, captchaSolution, captchaTrailX, captchaTrailY);
-                }
-            }
-        );
+        timer->async_wait([this, timer, username, password, referringUsername, email, voucherCode,
+                           secureToken, captchaSolution, captchaTrailX, captchaTrailY](const boost::system::error_code &ec) {
+            if (!ec) signup(username, password, referringUsername, email, voucherCode, secureToken,
+                            captchaSolution, captchaTrailX, captchaTrailY);
+        });
     } else {
         handleLoginOrSessionAnswer(serverApiRetCode, jsonData);
     }
@@ -693,6 +799,7 @@ void ApiResourcesManager::onSignupAnswer(ServerApiRetCode serverApiRetCode, cons
 void ApiResourcesManager::onSessionAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
+
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         std::unique_ptr<SessionStatus> ss(SessionStatus::createFromJson(jsonData));
         if (ss) {
@@ -700,27 +807,100 @@ void ApiResourcesManager::onSessionAnswer(ServerApiRetCode serverApiRetCode, con
                 sessionStatus_ = std::move(ss);
                 persistentSettings_.setSessionStatus(jsonData);
                 updateSessionStatus();
+
+                // Apply the server_inventory delta and notify the client if anything changed.
+                bool serverListChanged = applyInventoryDelta(jsonData);
+                if (serverListChanged && isLoginOkEmitted_)
+                    callback_->call(ApiResourcesManagerNotification::kLocationsUpdated, LoginResult::kSuccess, std::string());
+
             } else if (ss->errorCode() == SessionErrorCode::kSessionInvalid) {
                 callback_->call(ApiResourcesManagerNotification::kSessionDeleted, LoginResult::kSuccess, std::string());
             }
         }
     }
+
     lastUpdateTimeMs_[RequestType::kSessionStatus] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
     requestsInProgress_.erase(RequestType::kSessionStatus);
 }
 
-void ApiResourcesManager::onServerLocationsAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
+void ApiResourcesManager::onInventoryLocationsAnswer(ServerApiRetCode serverApiRetCode,
+                                                      const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
+
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
-        persistentSettings_.setLocations(jsonData);
-        if (isLoginOkEmitted_)
-            callback_->call(ApiResourcesManagerNotification::kLocationsUpdated, LoginResult::kSuccess, std::string());
-        else
-            checkForReadyLogin();
+        auto parsed = InventoryParser::parseLocations(jsonData);
+        if (!parsed.empty()) {
+            bool locationsChanged = (parsed != inventoryLocations_);
+            if (locationsChanged) {
+                inventoryLocations_ = std::move(parsed);
+                persistentSettings_.setInvLocations(jsonData);
+            }
+
+            if (locationsChanged || !serverLocations_) {
+                bool rebuilt = rebuildServerLocations();
+                if (isLoginOkEmitted_) {
+                    if (rebuilt)
+                        callback_->call(ApiResourcesManagerNotification::kLocationsUpdated, LoginResult::kSuccess, std::string());
+                } else {
+                    checkForReadyLogin();
+                }
+            } else {
+                g_logger->info("ApiResourcesManager::onInventoryLocationsAnswer: locations unchanged, suppressing kLocationsUpdated");
+                if (!isLoginOkEmitted_)
+                    checkForReadyLogin();
+            }
+        } else {
+            g_logger->error("ApiResourcesManager::onInventoryLocationsAnswer: failed to parse locations JSON");
+        }
     }
-    lastUpdateTimeMs_[RequestType::kLocations] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
-    requestsInProgress_.erase(RequestType::kLocations);
+
+    lastUpdateTimeMs_[RequestType::kInventoryLocations] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    requestsInProgress_.erase(RequestType::kInventoryLocations);
+}
+
+void ApiResourcesManager::onInventoryServersAnswer(ServerApiRetCode serverApiRetCode,
+                                                    const std::string &jsonData)
+{
+    std::lock_guard locker(mutex_);
+
+    if (serverApiRetCode == ServerApiRetCode::kSuccess) {
+        std::map<int, InventoryServer> newServers;
+        std::int64_t newRevision = 0;
+
+        if (InventoryParser::parseServers(jsonData, newServers, newRevision)) {
+            bool serversChanged = (newServers != inventoryServers_);
+
+            // Always persist the new revision — it may advance even without server changes.
+            invRevision_ = newRevision;
+            persistentSettings_.setInvRevision(invRevision_);
+
+            if (serversChanged) {
+                inventoryServers_ = std::move(newServers);
+                persistentSettings_.setInvServers(
+                    InventoryParser::serializeServers(inventoryServers_, invRevision_));
+            }
+
+            if (serversChanged || !serverLocations_) {
+                bool rebuilt = rebuildServerLocations();
+                if (isLoginOkEmitted_) {
+                    if (rebuilt)
+                        callback_->call(ApiResourcesManagerNotification::kLocationsUpdated, LoginResult::kSuccess, std::string());
+                } else {
+                    checkForReadyLogin();
+                }
+            } else {
+                g_logger->info("ApiResourcesManager::onInventoryServersAnswer: servers unchanged, suppressing kLocationsUpdated");
+                if (!isLoginOkEmitted_)
+                    checkForReadyLogin();
+            }
+        } else {
+            g_logger->error("ApiResourcesManager::onInventoryServersAnswer: failed to parse servers JSON");
+        }
+    }
+
+    lastUpdateTimeMs_[RequestType::kInventoryServers] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    requestsInProgress_.erase(RequestType::kInventoryServers);
 }
 
 void ApiResourcesManager::onStaticIpsAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
@@ -731,8 +911,6 @@ void ApiResourcesManager::onStaticIpsAnswer(ServerApiRetCode serverApiRetCode, c
         checkForReadyLogin();
         if (isLoginOkEmitted_)
             callback_->call(ApiResourcesManagerNotification::kStaticIpsUpdated, LoginResult::kSuccess, std::string());
-        else
-            checkForReadyLogin();
     }
     lastUpdateTimeMs_[RequestType::kStaticIps] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
     requestsInProgress_.erase(RequestType::kStaticIps);
@@ -749,13 +927,12 @@ void ApiResourcesManager::onServerConfigsAnswer(ServerApiRetCode serverApiRetCod
     }
     lastUpdateTimeMs_[RequestType::kServerConfigs] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
     requestsInProgress_.erase(RequestType::kServerConfigs);
-
 }
 
-void ApiResourcesManager::onServerCredentialsOpenVpnAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
+void ApiResourcesManager::onServerCredentialsOpenVpnAnswer(ServerApiRetCode serverApiRetCode,
+                                                            const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setServerCredentialsOvpn(jsonData);
         isOpenVpnCredentialsReceived_ = true;
@@ -766,10 +943,10 @@ void ApiResourcesManager::onServerCredentialsOpenVpnAnswer(ServerApiRetCode serv
     requestsInProgress_.erase(RequestType::kServerCredentialsOpenVPN);
 }
 
-void ApiResourcesManager::onServerCredentialsIkev2Answer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
+void ApiResourcesManager::onServerCredentialsIkev2Answer(ServerApiRetCode serverApiRetCode,
+                                                          const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setServerCredentialsIkev2(jsonData);
         isIkev2CredentialsReceived_ = true;
@@ -783,7 +960,6 @@ void ApiResourcesManager::onServerCredentialsIkev2Answer(ServerApiRetCode server
 void ApiResourcesManager::onPortMapAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setPortMap(jsonData);
         checkForReadyLogin();
@@ -795,7 +971,6 @@ void ApiResourcesManager::onPortMapAnswer(ServerApiRetCode serverApiRetCode, con
 void ApiResourcesManager::onNotificationsAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setNotifications(jsonData);
         if (isLoginOkEmitted_)
@@ -810,7 +985,6 @@ void ApiResourcesManager::onNotificationsAnswer(ServerApiRetCode serverApiRetCod
 void ApiResourcesManager::onCheckUpdateAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         checkUpdate_ = jsonData;
         callback_->call(ApiResourcesManagerNotification::kCheckUpdate, LoginResult::kSuccess, std::string());
@@ -819,10 +993,10 @@ void ApiResourcesManager::onCheckUpdateAnswer(ServerApiRetCode serverApiRetCode,
     requestsInProgress_.erase(RequestType::kCheckUpdate);
 }
 
-void ApiResourcesManager::onAmneziawgUnblockParamsAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
+void ApiResourcesManager::onAmneziawgUnblockParamsAnswer(ServerApiRetCode serverApiRetCode,
+                                                          const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setAmneziawgUnblockParams(jsonData);
         callback_->call(ApiResourcesManagerNotification::kAmneziawgUnblockParamsFinished, LoginResult::kSuccess, std::string());
@@ -831,12 +1005,17 @@ void ApiResourcesManager::onAmneziawgUnblockParamsAnswer(ServerApiRetCode server
     requestsInProgress_.erase(RequestType::kAmneziawgUnblockParams);
 }
 
-void ApiResourcesManager::onDeleteSessionAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
+void ApiResourcesManager::onDeleteSessionAnswer(ServerApiRetCode serverApiRetCode,
+                                                 const std::string &jsonData)
 {
     std::lock_guard locker(mutex_);
     g_logger->info("ApiResourcesManager::onDeleteSessionAnswer retCode: {}", (int)serverApiRetCode);
     callback_->call(ApiResourcesManagerNotification::kLogoutFinished, LoginResult::kSuccess, std::string());
 }
+
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
 
 bool ApiResourcesManager::isTimeoutForRequest(RequestType requestType, int timeout)
 {
@@ -845,28 +1024,31 @@ bool ApiResourcesManager::isTimeoutForRequest(RequestType requestType, int timeo
         return true;
 
     if (it->second.isRequestSuccess) {
-        if (utils::since(it->second.updateTime).count() > timeout)
-            return true;
+        return utils::since(it->second.updateTime).count() > timeout;
     } else {
-        if (utils::since(it->second.updateTime).count() > kDelayBetweenFailedRequests)
-            return true;
+        return utils::since(it->second.updateTime).count() > kDelayBetweenFailedRequests;
     }
-
-    return false;
 }
 
 void ApiResourcesManager::clearValues()
 {
     g_logger->info("ApiResourcesManager::clearValues");
     isFetchingServerCredentials_ = false;
-    isLoginOkEmitted_ = false;
+    isLoginOkEmitted_            = false;
     sessionStatus_.reset();
     prevSessionStatus_.reset();
+    serverLocations_.reset();
+    inventoryLocations_.clear();
+    inventoryServers_.clear();
+    invRevision_ = 0;
     checkUpdate_.clear();
     lastUpdateTimeMs_.clear();
+
     persistentSettings_.setAuthHash(std::string());
     persistentSettings_.setSessionStatus(std::string());
-    persistentSettings_.setLocations(std::string());
+    persistentSettings_.setInvLocations(std::string());
+    persistentSettings_.setInvServers(std::string());
+    persistentSettings_.setInvRevision(0);
     persistentSettings_.setServerCredentialsOvpn(std::string());
     persistentSettings_.setServerCredentialsIkev2(std::string());
     persistentSettings_.setServerConfigs(std::string());

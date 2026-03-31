@@ -15,8 +15,35 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+# Determine version from git tags (e.g. v1.4.8 or v1.4.8-3-gabcdef1)
+find_package(Git QUIET)
+set(WSNET_VERSION_FALLBACK "0.0.0")
+set(WSNET_GIT_DESCRIBE "unknown")
+
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} describe --tags --long
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE WSNET_GIT_DESCRIBE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE GIT_DESCRIBE_RESULT
+    )
+    if(GIT_DESCRIBE_RESULT EQUAL 0)
+        string(REGEX REPLACE "^v?([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1" WSNET_VERSION "${WSNET_GIT_DESCRIBE}")
+    else()
+        set(WSNET_VERSION ${WSNET_VERSION_FALLBACK})
+        set(WSNET_GIT_DESCRIBE "${WSNET_VERSION_FALLBACK}-untagged")
+    endif()
+else()
+    set(WSNET_VERSION ${WSNET_VERSION_FALLBACK})
+    set(WSNET_GIT_DESCRIBE "${WSNET_VERSION_FALLBACK}-nogit")
+endif()
+
+message(STATUS "wsnet version: ${WSNET_VERSION} (${WSNET_GIT_DESCRIBE})")
+
 project(wsnet
-    VERSION 1.4.8
+    VERSION ${WSNET_VERSION}
     DESCRIPTION "The wsnet library for Windscribe client programs"
     LANGUAGES CXX
 )

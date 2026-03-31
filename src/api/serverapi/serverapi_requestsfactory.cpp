@@ -25,11 +25,17 @@ BaseRequest *serverapi_requests_factory::login(const std::string &username, cons
 }
 
 BaseRequest *serverapi_requests_factory::session(const std::string &authHash, const std::string &appleId,
-                                       const std::string &gpDeviceId, RequestFinishedCallback callback)
+                                       const std::string &gpDeviceId, std::int64_t invRev, bool backup, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["apple_id"] = appleId;
     extraParams["gp_device_id"] = gpDeviceId;
+    if (invRev != 0) {
+        extraParams["inv_rev"] = std::to_string(invRev);
+    }
+    if (backup) {
+        extraParams["backup"] = "1";
+    }
     auto request = new BaseRequest(HttpMethod::kGet, SubdomainType::kApi, RequestPriority::kNormal, "Session", extraParams, callback);
     request->setBearerToken(authHash);
     return request;
@@ -64,6 +70,25 @@ BaseRequest *serverapi_requests_factory::serverLocations(PersistentSettings &per
     std::string strIsPro = isPro ? "1" : "0";
     return new ServerLocationsRequest(RequestPriority::kNormal, "/serverlist/mob-v2/" + strIsPro + "/" + revision, extraParams, persistentSettings,
                                       connectState, advancedParameters, callback);
+}
+
+BaseRequest *serverapi_requests_factory::getLocations(const std::string &authHash, RequestFinishedCallback callback)
+{
+    std::map<std::string, std::string> extraParams;
+    auto request = new BaseRequest(HttpMethod::kGet, SubdomainType::kApi, RequestPriority::kNormal, "Inventory/locations", extraParams, callback);
+    request->setBearerToken(authHash);
+    return request;
+}
+
+BaseRequest *serverapi_requests_factory::getServers(const std::string &authHash, bool backup, RequestFinishedCallback callback)
+{
+    std::map<std::string, std::string> extraParams;
+    if (backup) {
+        extraParams["backup"] = "1";
+    }
+    auto request = new BaseRequest(HttpMethod::kGet, SubdomainType::kApi, RequestPriority::kNormal, "Inventory/servers", extraParams, callback);
+    request->setBearerToken(authHash);
+    return request;
 }
 
 BaseRequest *serverapi_requests_factory::myIP(RequestFinishedCallback callback)

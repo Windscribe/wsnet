@@ -68,7 +68,7 @@ public:
         // Make the variable g_logger global as a raw pointer
         g_logger = logger_.get();
 
-        g_logger->info("wsnet version: {}", WSNET_VERSION_STRING);
+        g_logger->info("wsnet version: {}", WSNET_VERSION_DESCRIBE);
 
         dnsResolver_ = std::make_shared<DnsResolver_cares>();
         if (!dnsResolver_->init()) {

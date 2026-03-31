@@ -39,14 +39,20 @@ public:
                                                            const std::string &secureToken, const std::string &captchaSolution, const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY,
                                                            WSNetRequestFinishedCallback callback) = 0;
     // appleId or gpDeviceId (ios or android) device ID, set them empty if they are not required
+    // invRev - inventory revision number (long) received in getServers, pass 0 for latest.
+    // backup - set to true to receive backup/failover IPs instead of primary IPs
     virtual std::shared_ptr<WSNetCancelableCallback> session(const std::string &authHash, const std::string &appleId,
-                                                             const std::string &gpDeviceId, WSNetRequestFinishedCallback callback) = 0;
+                                                             const std::string &gpDeviceId, std::int64_t invRev, bool backup, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> claimVoucherCode(const std::string &authHash, const std::string &voucherCode, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> deleteSession(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
 
+    // DEPRECATED: Use getLocations() instead. All calls related to assets domain will be removed in future.
     virtual std::shared_ptr<WSNetCancelableCallback> serverLocations(const std::string &language, const std::string &revision,
                                                                      bool isPro, const std::vector<std::string> &alcList,
                                                                      WSNetRequestFinishedCallback callback) = 0;
+    virtual std::shared_ptr<WSNetCancelableCallback> getLocations(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
+    // backup - set to true to receive backup/failover IPs instead of primary IPs
+    virtual std::shared_ptr<WSNetCancelableCallback> getServers(const std::string &authHash, bool backup, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> serverCredentials(const std::string &authHash, bool isOpenVpnProtocol, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> serverConfigs(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> portMap(const std::string &authHash, std::uint32_t version, const std::vector<std::string> &forceProtocols, WSNetRequestFinishedCallback callback) = 0;

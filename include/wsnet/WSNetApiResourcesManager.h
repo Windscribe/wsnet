@@ -7,6 +7,7 @@
 #include "scapix_object.h"
 #include "WSNetCancelableCallback.h"
 #include "WSNetServerAPI.h"
+#include "WSNetServerLocations.h"
 
 namespace wsnet {
 
@@ -123,7 +124,7 @@ public:
     // the following functions return the current API data in json format
     virtual std::string sessionStatus() const = 0;
     virtual std::string portMap() const = 0;
-    virtual std::string locations() const = 0;
+    virtual std::shared_ptr<WSNetServerLocations> serverLocations() const = 0;
     virtual std::string staticIps() const = 0;
     virtual std::string serverCredentialsOvpn() const = 0;
     virtual std::string serverCredentialsIkev2() const = 0;

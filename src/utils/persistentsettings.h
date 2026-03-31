@@ -1,7 +1,8 @@
 #pragma once
-#include <string>
+#include <cstdint>
 #include <map>
 #include <mutex>
+#include <string>
 
 namespace wsnet {
 
@@ -25,8 +26,19 @@ public:
     void setSessionStatus(const std::string &sessionStatus);
     std::string sessionStatus() const;
 
-    void setLocations(const std::string &locations);
-    std::string locations() const;
+    // Inventory v2: raw /Inventory/locations JSON.
+    void setInvLocations(const std::string &invLocations);
+    std::string invLocations() const;
+
+    // Inventory v2: serialized server map (produced by InventoryParser::serializeServers).
+    void setInvServers(const std::string &invServers);
+    std::string invServers() const;
+
+    // Inventory v2: last known server revision. Stored separately so that a
+    // revision-only update (empty delta) does not require re-serializing the
+    // entire server map.
+    void setInvRevision(std::int64_t revision);
+    std::int64_t invRevision() const;
 
     void setServerCredentialsOvpn(const std::string &serverCredentials);
     std::string serverCredentialsOvpn() const;
@@ -64,7 +76,9 @@ private:
 
     std::string authHash_;
     std::string sessionStatus_;
-    std::string locations_;
+    std::string invLocations_;
+    std::string invServers_;
+    std::int64_t invRevision_ = 0;
     std::string serverCredentialsOvpn_;
     std::string serverCredentialsIkev2_;
     std::string serverConfigs_;
