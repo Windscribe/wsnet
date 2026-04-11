@@ -2,6 +2,10 @@
 #include <curl/curl.h>
 #include <ares.h>
 
+#ifndef _WIN32
+    #include <errno.h>
+#endif
+
 namespace wsnet {
 
 RequestError::RequestError(int errorCode, RequestErrorType type) :
