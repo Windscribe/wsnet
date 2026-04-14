@@ -29,6 +29,9 @@ struct ServerGroup
     std::string city;
     std::string nick;
     bool premiumOnly = false;
+    int status = 1;     // 0 -> DC is deprecated and will not show up in the v2 API
+                        // 1 -> all good
+                        // 2 -> DC not deprecated, but has no hosts -> pylon icon
     std::string pingIp;
     std::string pingHost;
     std::string wgPubKey;

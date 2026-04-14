@@ -368,6 +368,7 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
             group.id          = dc.id;
             group.city        = dc.city;
             group.nick        = dc.nick;
+            group.status      = dc.status;
             group.premiumOnly = dc.premiumOnly;
             group.wgPubKey    = dc.wgPubkey;
             group.ovpnX509    = dc.ovpnX509;
@@ -493,6 +494,8 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
             jsonGroup.AddMember("city",          rapidjson::Value(dc.city.c_str(), alloc), alloc);
             jsonGroup.AddMember("nick",          rapidjson::Value(dc.nick.c_str(), alloc), alloc);
             jsonGroup.AddMember("premium_only",  dc.premiumOnly, alloc);
+            jsonGroup.AddMember("status",        dc.status, alloc);
+            jsonGroup.AddMember("p2p",           dc.p2p, alloc);
             jsonGroup.AddMember("ping_ip",       rapidjson::Value(pingIp.c_str(), alloc), alloc);
             jsonGroup.AddMember("ping_host",     rapidjson::Value(pingHost.c_str(), alloc), alloc);
             jsonGroup.AddMember("wg_pub_key",    rapidjson::Value(dc.wgPubkey.c_str(), alloc), alloc);

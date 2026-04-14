@@ -19,7 +19,9 @@ struct InventoryDatacenter {
     std::string city;
     std::string nick;
     std::string iata;
-    int         status      = 1;   // 1 = active, 0 = disabled
+    int         status      = 1;   // 0 -> DC is deprecated and will not show up in the v2 API
+                                   // 1 -> all good
+                                   // 2 -> DC not deprecated, but has no hosts -> pylon icon
     int         p2p         = 0;
     bool        premiumOnly = false;
     std::string wgPubkey;
