@@ -65,7 +65,7 @@ build:wsnet:win:
   artifacts:
     expire_in: 1 day
     paths:
-      - build/test
+      - build/
 
 build:wsnet:mac:
   <<: *template_mac_build
@@ -77,13 +77,14 @@ build:wsnet:mac:
       -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-universal-osx
       -DIS_BUILD_TESTS=ON
+      -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations,-clang-analyzer-osx.cocoa.RetainCount,-clang-analyzer-nullability.NullablePassedToNonnull;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
     - cmake --build build --parallel
   artifacts:
     expire_in: 1 day
     paths:
-      - build/test
-      - build/libs/wsnet
-      - build/_cmrc
+      - build/
   rules:
     - if: $BUILD_MAC == "y" && $NIGHTLY_TEST_BUILD == "y"
     - if: $BUILD_MAC == "y" && $CI_PIPELINE_SOURCE == "push"
@@ -94,21 +95,123 @@ build:wsnet:rhel:
   variables:
     GIT_STRATEGY: clone
   script:
+    - python3 -m pip install clang-tidy
     - cmake -B build -S .
       -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-x64-linux
       -DIS_BUILD_TESTS=ON
+      -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
     - cmake --build build --parallel
 
   artifacts:
     expire_in: 1 day
     paths:
-      - build/test
-      - build/libs/wsnet
-      - build/_cmrc
+      - build/
   rules:
     - if: $BUILD_LINUX == "y" && $NIGHTLY_TEST_BUILD == "y"
     - if: $BUILD_LINUX == "y" &&$CI_PIPELINE_SOURCE == "push"
+
+test:wsnet:win:
+  <<: *template_win10_build
+  stage: Test
+  variables:
+    GIT_STRATEGY: clone
+  script:
+    - pip3 install pproxy
+    - Start-Process -NoNewWindow -PassThru pproxy
+    - Try {
+        build/test/Release/wsnet_test.exe --gtest_output=xml:report_win.xml
+      } Catch {
+          throw
+      } Finally {
+          Get-Process "pproxy" | Stop-Process -Force
+      }
+  after_script:
+    - Get-Process "pproxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; $true
+  retry: 2
+  needs:
+    - job: build:wsnet:win
+      optional: true
+      artifacts: true
+  rules:
+    - if: $BUILD_WIN == "y" && $NIGHTLY_TEST_BUILD == "y"
+  artifacts:
+    when: always
+    expire_in: 1 day
+    paths:
+      - report_win.xml
+    reports:
+      junit: report_win.xml
+
+test:wsnet:mac:
+  <<: *template_mac_build
+  stage: Test
+  script:
+    - pip3 install pproxy gcovr
+    - install_name_tool -add_rpath "${CI_PROJECT_DIR}/build" build/test/wsnet_test || true
+    - set +o pipefail
+    - if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
+    - python3 -m pproxy &
+    - build/test/wsnet_test --gtest_output=xml:report_macos.xml || FAILED=1
+    - kill %1
+    - if [ $FAILED ]; then exit 1; fi
+  coverage: /^\s*lines:\s*\d+.\d+\%/
+  after_script:
+    - python3 -m gcovr --xml-pretty --exclude-unreachable-branches --print-summary --gcov-ignore-parse-errors=negative_hits.warn -o coverage.xml --root ${CI_PROJECT_DIR} --filter src/ --exclude src/private/tests/
+  retry: 2
+  needs:
+    - job: build:wsnet:mac
+      optional: true
+      artifacts: true
+  rules:
+    - if: $BUILD_MAC == "y" && $NIGHTLY_TEST_BUILD == "y"
+  artifacts:
+    when: always
+    name: ${CI_JOB_NAME}-${CI_COMMIT_REF_NAME}-${CI_COMMIT_SHA}-mac
+    expire_in: 1 day
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+      junit: report_macos.xml
+    paths:
+      - report_macos.xml
+
+test:wsnet:rhel:
+  <<: *template_rhel_build
+  stage: Test
+  script:
+    - pip3 install pproxy gcovr
+    - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/build:${LD_LIBRARY_PATH}"
+    - set +o pipefail
+    - if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
+    - python3 -m pproxy &
+    - build/test/wsnet_test --gtest_output=xml:report_linux.xml || FAILED=1
+    - kill %1
+    - if [ $FAILED ]; then exit 1; fi
+  coverage: /^\s*lines:\s*\d+.\d+\%/
+  after_script:
+    - python3 -m gcovr --xml-pretty --exclude-unreachable-branches --print-summary --gcov-ignore-parse-errors=negative_hits.warn -o coverage.xml --root ${CI_PROJECT_DIR} --filter src/ --exclude src/private/tests/
+  retry: 2
+  needs:
+    - job: build:wsnet:rhel
+      optional: true
+      artifacts: true
+  rules:
+    - if: $BUILD_LINUX == "y" && $NIGHTLY_TEST_BUILD == "y"
+  artifacts:
+    when: always
+    name: ${CI_JOB_NAME}-${CI_COMMIT_REF_NAME}-${CI_COMMIT_SHA}-linux
+    expire_in: 1 day
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+      junit: report_linux.xml
+    paths:
+      - report_linux.xml
 
 build:wsnet:ios:
   <<: *template_mac_build
@@ -126,7 +229,7 @@ build:wsnet:ios:
       - ./tools/build/WSNet.xcframework.zip
     expire_in: 1 week
   rules:
-    - if: $BUILD_IOS == "y" && $CI_PIPELINE_SOURCE == "push"
+    - if: $BUILD_IOS == "y" && ($NIGHTLY_TEST_BUILD == "y" || $CI_PIPELINE_SOURCE == "push")
 
 
 build:wsnet:android:
@@ -156,4 +259,4 @@ build:wsnet:android:
       - ./tools/WSNet.aar.zip
     expire_in: 1 week
   rules:
-    - if: $BUILD_ANDROID == "y" && $CI_PIPELINE_SOURCE == "push"
+    - if: $BUILD_ANDROID == "y" && ($NIGHTLY_TEST_BUILD == "y" || $CI_PIPELINE_SOURCE == "push")
