@@ -1,3 +1,8 @@
+1.5.2 (30/03/2026)
+All:
+   * Moved p2p field from ServerLocation to ServerGroup for per-datacenter granularity.
+
+
 1.5.0 (23/03/2026)
 All:
    * Updated v2 server list field names, added tri-state backup parameter, and AmneziaWG login-readiness gating.

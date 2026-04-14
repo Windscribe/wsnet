@@ -35,6 +35,7 @@ struct ServerGroup
     std::string ovpnX509;
     int linkSpeed = 100;
     int netLoad = 0;
+    int p2p = 0;
     std::string dnsHostName;  // if non-empty, overrides the parent location's dnsHostName
     std::vector<ServerNode> nodes;
 };
@@ -46,7 +47,6 @@ struct ServerLocation
     std::string countryCode;
     std::string shortName;
     bool premiumOnly = false;
-    int p2p = 0;
     std::string dnsHostName;
     std::vector<ServerGroup> groups;
 };

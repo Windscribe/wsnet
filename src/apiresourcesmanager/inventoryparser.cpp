@@ -362,14 +362,9 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
         serverLoc.countryCode = loc.countryCode;
         serverLoc.shortName   = loc.shortName;
         serverLoc.premiumOnly = loc.premiumOnly;
-        serverLoc.p2p         = 1;
 
         for (const auto &dc : loc.datacenters) {
             if (dc.status != 1) continue;
-
-            // If any datacenter in this location prohibits P2P, mark the location.
-            if (dc.p2p == 0)
-                serverLoc.p2p = 0;
 
             ServerGroup group;
             group.id          = dc.id;
@@ -380,6 +375,7 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
             group.ovpnX509    = dc.ovpnX509;
             group.linkSpeed   = dc.linkSpeed;
             group.dnsHostName = dc.ovpnX509;
+            group.p2p         = dc.p2p;
             group.netLoad     = -1;
 
             auto it = dcServersMap.find(dc.id);
