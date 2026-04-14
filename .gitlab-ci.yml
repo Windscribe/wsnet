@@ -151,11 +151,12 @@ test:wsnet:mac:
   <<: *template_mac_build
   stage: Test
   script:
-    - pip3 install pproxy gcovr
+    - /usr/bin/python3 -m pip install pproxy
+    - pip3 install gcovr
     - install_name_tool -add_rpath "${CI_PROJECT_DIR}/build" build/test/wsnet_test || true
     - set +o pipefail
     - if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
-    - python3 -m pproxy &
+    - /usr/bin/python3 -m pproxy &
     - build/test/wsnet_test --gtest_output=xml:report_macos.xml || FAILED=1
     - kill %1
     - if [ $FAILED ]; then exit 1; fi

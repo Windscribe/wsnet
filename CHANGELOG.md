@@ -1,3 +1,8 @@
+1.5.7 (13/04/2026)
+All:
+   * Updated OpenSSL to 3.6.2.
+
+
 1.5.6 (11/04/2026)
 All:
    * Expose inventory datacenter `status` in server locations (`ServerGroup::status` on desktop; `status` and per-datacenter `p2p` on each group in `locationsJson()` on mobile).
