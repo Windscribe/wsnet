@@ -102,7 +102,7 @@ endif()
 
 # Set platform specific dependencies
 if (APPLE)
-    set(OS_SPECIFIC_LIBRARIES "-framework Foundation" "-framework CFNetwork")
+    set(OS_SPECIFIC_LIBRARIES "-framework Foundation" "-framework CFNetwork" "-framework SystemConfiguration")
     target_compile_options(wsnet PRIVATE "-fobjc-arc")
 endif()
 
