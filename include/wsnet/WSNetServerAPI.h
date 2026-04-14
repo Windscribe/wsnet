@@ -40,9 +40,9 @@ public:
                                                            WSNetRequestFinishedCallback callback) = 0;
     // appleId or gpDeviceId (ios or android) device ID, set them empty if they are not required
     // invRev - inventory revision number (long) received in getServers, pass 0 for latest.
-    // backup - set to true to receive backup/failover IPs instead of primary IPs
+    // backup - -1: omit parameter, 0: request primary IPs, 1: request backup/failover IPs
     virtual std::shared_ptr<WSNetCancelableCallback> session(const std::string &authHash, const std::string &appleId,
-                                                             const std::string &gpDeviceId, std::int64_t invRev, bool backup, WSNetRequestFinishedCallback callback) = 0;
+                                                             const std::string &gpDeviceId, std::int64_t invRev, std::int32_t backup, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> claimVoucherCode(const std::string &authHash, const std::string &voucherCode, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> deleteSession(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
 
@@ -51,8 +51,8 @@ public:
                                                                      bool isPro, const std::vector<std::string> &alcList,
                                                                      WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> getLocations(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
-    // backup - set to true to receive backup/failover IPs instead of primary IPs
-    virtual std::shared_ptr<WSNetCancelableCallback> getServers(const std::string &authHash, bool backup, WSNetRequestFinishedCallback callback) = 0;
+    // backup - -1: omit parameter, 0: request primary IPs, 1: request backup/failover IPs
+    virtual std::shared_ptr<WSNetCancelableCallback> getServers(const std::string &authHash, std::int32_t backup, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> serverCredentials(const std::string &authHash, bool isOpenVpnProtocol, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> serverConfigs(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> portMap(const std::string &authHash, std::uint32_t version, const std::vector<std::string> &forceProtocols, WSNetRequestFinishedCallback callback) = 0;

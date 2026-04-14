@@ -68,6 +68,7 @@ public:
 
     void setNotificationPcpid(const std::string &pcpid) override;
     void setMobileDeviceId(const std::string &appleId, const std::string &gpDeviceId) override;
+    void setBackup(std::int32_t backup) override;
 
     std::string sessionStatus() const override;
     std::string portMap() const override;
@@ -112,6 +113,7 @@ private:
     std::string appleId_;
     std::string gpDeviceId_;
     std::string authTokenResult_;
+    std::int32_t backup_ = -1;
 
     static constexpr int kMinute  = 60 * 1000;
     static constexpr int kHour    = 60 * 60 * 1000;
@@ -152,6 +154,9 @@ private:
     } checkUpdateData_;
     bool isCheckUpdateDataSet_ = false;
 
+    bool forceRefetchSessionStatus_ = false;
+    bool forceRefetchInventoryServers_ = false;
+
     void handleLoginOrSessionAnswer(wsnet::ServerApiRetCode serverApiRetCode, const std::string &jsonData);
 
     void checkForReadyLogin();
@@ -166,9 +171,9 @@ private:
     bool applyInventoryDelta(const std::string &sessionJson);
 
     void fetchAll();
-    void fetchSession(const std::string &authHash);
+    bool fetchSession(const std::string &authHash);
     void fetchInventoryLocations();
-    void fetchInventoryServers();
+    bool fetchInventoryServers();
     void fetchStaticIps(const std::string &authHash);
     void fetchServerConfigs(const std::string &authHash);
     void fetchServerCredentialsOpenVpn(const std::string &authHash);

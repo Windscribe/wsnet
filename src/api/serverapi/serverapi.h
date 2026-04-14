@@ -30,14 +30,14 @@ public:
                                                    const std::string &code2fa, const std::string &secureToken, const std::string &captchaSolution,
                                                    const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> session(const std::string &authHash, const std::string &appleId,
-                                                     const std::string &gpDeviceId, std::int64_t invRev, bool backup, WSNetRequestFinishedCallback callback) override;
+                                                     const std::string &gpDeviceId, std::int64_t invRev, std::int32_t backup, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> claimVoucherCode(const std::string &authHash, const std::string &voucherCode, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> deleteSession(const std::string &authHash, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> serverLocations(const std::string &language, const std::string &revision,
                                                                      bool isPro, const std::vector<std::string> &alcList,
                                                                      WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> getLocations(const std::string &authHash, WSNetRequestFinishedCallback callback) override;
-    std::shared_ptr<WSNetCancelableCallback> getServers(const std::string &authHash, bool backup, WSNetRequestFinishedCallback callback) override;
+    std::shared_ptr<WSNetCancelableCallback> getServers(const std::string &authHash, std::int32_t backup, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> serverCredentials(const std::string &authHash, bool isOpenVpnProtocol, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> serverConfigs(const std::string &authHash, WSNetRequestFinishedCallback callback) override;
 

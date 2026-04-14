@@ -1,3 +1,8 @@
+1.5.0 (23/03/2026)
+All:
+   * Updated v2 server list field names, added tri-state backup parameter, and AmneziaWG login-readiness gating.
+
+
 1.4.9 (09/03/2026)
 All:
    * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo. #9

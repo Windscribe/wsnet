@@ -25,7 +25,7 @@ BaseRequest *serverapi_requests_factory::login(const std::string &username, cons
 }
 
 BaseRequest *serverapi_requests_factory::session(const std::string &authHash, const std::string &appleId,
-                                       const std::string &gpDeviceId, std::int64_t invRev, bool backup, RequestFinishedCallback callback)
+                                       const std::string &gpDeviceId, std::int64_t invRev, std::int32_t backup, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["apple_id"] = appleId;
@@ -33,7 +33,9 @@ BaseRequest *serverapi_requests_factory::session(const std::string &authHash, co
     if (invRev != 0) {
         extraParams["inv_rev"] = std::to_string(invRev);
     }
-    if (backup) {
+    if (backup == 0) {
+        extraParams["backup"] = "0";
+    } else if (backup == 1) {
         extraParams["backup"] = "1";
     }
     auto request = new BaseRequest(HttpMethod::kGet, SubdomainType::kApi, RequestPriority::kNormal, "Session", extraParams, callback);
@@ -80,10 +82,12 @@ BaseRequest *serverapi_requests_factory::getLocations(const std::string &authHas
     return request;
 }
 
-BaseRequest *serverapi_requests_factory::getServers(const std::string &authHash, bool backup, RequestFinishedCallback callback)
+BaseRequest *serverapi_requests_factory::getServers(const std::string &authHash, std::int32_t backup, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
-    if (backup) {
+    if (backup == 0) {
+        extraParams["backup"] = "0";
+    } else if (backup == 1) {
         extraParams["backup"] = "1";
     }
     auto request = new BaseRequest(HttpMethod::kGet, SubdomainType::kApi, RequestPriority::kNormal, "Inventory/servers", extraParams, callback);

@@ -15,11 +15,12 @@ class InventoryParser;  // forward declaration — grants friendship without pul
 
 struct ServerNode
 {
-    std::string hostname;
+    std::string host;
     std::string ip;
     std::string ip2;
     std::string ip3;
     int weight = 0;
+    int ipv6 = 0;
 };
 
 struct ServerGroup
@@ -33,7 +34,7 @@ struct ServerGroup
     std::string wgPubKey;
     std::string ovpnX509;
     int linkSpeed = 100;
-    int health = 0;
+    int netLoad = 0;
     std::string dnsHostName;  // if non-empty, overrides the parent location's dnsHostName
     std::vector<ServerNode> nodes;
 };

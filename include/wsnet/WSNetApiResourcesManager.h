@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <functional>
@@ -120,6 +121,10 @@ public:
 
     // appleId or gpDeviceId (ios or android) device ID, set them empty if they are not required
     virtual void setMobileDeviceId(const std::string &appleId, const std::string &gpDeviceId) = 0;
+
+    // backup parameter for session and getServers API calls
+    // -1: omit parameter, 0: request primary IPs, 1: request backup/failover IPs
+    virtual void setBackup(std::int32_t backup) = 0;
 
     // the following functions return the current API data in json format
     virtual std::string sessionStatus() const = 0;

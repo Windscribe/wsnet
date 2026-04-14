@@ -55,19 +55,22 @@ struct InventoryLocation {
 // ---------------------------------------------------------------------------
 
 struct InventoryServer {
-    int         id           = 0;
-    std::string hostname;
+    int         id       = 0;
+    std::string host;
     std::string ip;
     std::string ip2;
     std::string ip3;
-    int         datacenterId = 0;
-    int         weight       = 1;
-    int         health       = 0;
+    int         ipv6     = 0;
+    int         dcId     = 0;
+    int         weight   = 1;
+    int         netLoad  = 0;
+    int         sClass   = 0;
 
     bool operator==(const InventoryServer &o) const {
-        return id == o.id && hostname == o.hostname && ip == o.ip &&
-               ip2 == o.ip2 && ip3 == o.ip3 && datacenterId == o.datacenterId &&
-               weight == o.weight && health == o.health;
+        return id == o.id && host == o.host && ip == o.ip &&
+               ip2 == o.ip2 && ip3 == o.ip3 && ipv6 == o.ipv6 &&
+               dcId == o.dcId && weight == o.weight &&
+               netLoad == o.netLoad && sClass == o.sClass;
     }
 };
 
@@ -120,8 +123,8 @@ public:
     //
     // Mapping: InventoryDatacenter → ServerGroup, InventoryServer → ServerNode.
     // Datacenters with status != 1 or no servers in |servers| are skipped.
-    // pingIp / pingHost are taken from the first server in each datacenter (pingHost is a full URL: https://<hostname>:6464/latency).
-    // Group health is the average of all server health values in the datacenter.
+    // pingIp / pingHost are taken from the first server in each datacenter (pingHost is a full URL: http://<host>:6464/latency).
+    // Group health is the average of all server net_load values in the datacenter.
     // Group.pro is always false (server-side filtering ensures access).
     // Location.p2p is 1 if any of its datacenters has p2p != 0.
     static std::shared_ptr<WSNetServerLocations> buildServerLocations(

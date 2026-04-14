@@ -97,7 +97,7 @@ bool ApiResourcesManager::loginWithAuthHash()
 
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(
-        persistentSettings_.authHash(), appleId_, gpDeviceId_, invRevision_, false,
+        persistentSettings_.authHash(), appleId_, gpDeviceId_, invRevision_, backup_,
         std::bind(&ApiResourcesManager::onInitialSessionAnswer, this, _1, _2));
 
     return true;
@@ -245,6 +245,17 @@ void ApiResourcesManager::setMobileDeviceId(const std::string &appleId, const st
     std::lock_guard locker(mutex_);
     appleId_    = appleId;
     gpDeviceId_ = gpDeviceId;
+}
+
+void ApiResourcesManager::setBackup(std::int32_t backup)
+{
+    std::lock_guard locker(mutex_);
+    if (backup_ != backup) {
+        g_logger->info("ApiResourcesManager: backup parameter changed from {} to {}", backup_, backup);
+        backup_ = backup;
+        forceRefetchSessionStatus_ = true;
+        forceRefetchInventoryServers_ = true;
+    }
 }
 
 std::string ApiResourcesManager::sessionStatus() const  { return persistentSettings_.sessionStatus(); }
@@ -411,7 +422,8 @@ void ApiResourcesManager::checkForReadyLogin()
         !persistentSettings_.serverConfigs().empty() &&
         !persistentSettings_.portMap().empty() &&
         !persistentSettings_.staticIps().empty() &&
-        !persistentSettings_.notifications().empty())
+        !persistentSettings_.notifications().empty() &&
+        !persistentSettings_.amneziawgUnblockParams().empty())
     {
         if (!isLoginOkEmitted_) {
             isLoginOkEmitted_ = true;
@@ -440,11 +452,15 @@ void ApiResourcesManager::fetchAll()
 {
     // Session — with current inv_rev for delta delivery.
     if (connectState_.isVPNConnected()) {
-        if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInConnectedStateMs_))
-            fetchSession(persistentSettings_.authHash());
+        if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInConnectedStateMs_) || forceRefetchSessionStatus_)
+            if (fetchSession(persistentSettings_.authHash())) {
+                forceRefetchSessionStatus_ = false;
+            }
     } else {
-        if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInDisconnectedStateMs_))
-            fetchSession(persistentSettings_.authHash());
+        if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInDisconnectedStateMs_) || forceRefetchSessionStatus_)
+            if (fetchSession(persistentSettings_.authHash())) {
+                forceRefetchSessionStatus_ = false;
+            }
     }
 
     // Inventory locations — infrequently changing metadata (countries / datacenters), every 24h
@@ -452,8 +468,11 @@ void ApiResourcesManager::fetchAll()
         fetchInventoryLocations();
 
     // Full server list — safety fallback; delta updates arrive via session polls, every 24h and on the first start
-    if (isTimeoutForRequest(RequestType::kInventoryServers, locationsMs_))
-        fetchInventoryServers();
+    if (isTimeoutForRequest(RequestType::kInventoryServers, locationsMs_) || forceRefetchInventoryServers_) {
+        if (fetchInventoryServers()) {
+            forceRefetchInventoryServers_ = false;
+        }
+    }
 
     // Static IPs every 24h.
     if (isTimeoutForRequest(RequestType::kStaticIps, staticIpsMs_))
@@ -484,15 +503,16 @@ void ApiResourcesManager::fetchAll()
         fetchAmneziawgUnblockParams(persistentSettings_.authHash());
 }
 
-void ApiResourcesManager::fetchSession(const std::string &authHash)
+bool ApiResourcesManager::fetchSession(const std::string &authHash)
 {
     if (requestsInProgress_.find(RequestType::kSessionStatus) != requestsInProgress_.end())
-        return;
+        return false;
 
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(
-        authHash, appleId_, gpDeviceId_, invRevision_, false,
+        authHash, appleId_, gpDeviceId_, invRevision_, backup_,
         std::bind(&ApiResourcesManager::onSessionAnswer, this, _1, _2));
+    return true;
 }
 
 void ApiResourcesManager::fetchInventoryLocations()
@@ -506,15 +526,16 @@ void ApiResourcesManager::fetchInventoryLocations()
         std::bind(&ApiResourcesManager::onInventoryLocationsAnswer, this, _1, _2));
 }
 
-void ApiResourcesManager::fetchInventoryServers()
+bool ApiResourcesManager::fetchInventoryServers()
 {
     if (requestsInProgress_.find(RequestType::kInventoryServers) != requestsInProgress_.end())
-        return;
+        return false;
 
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kInventoryServers] = serverAPI_->getServers(
-        persistentSettings_.authHash(), false,
+        persistentSettings_.authHash(), backup_,
         std::bind(&ApiResourcesManager::onInventoryServersAnswer, this, _1, _2));
+    return true;
 }
 
 void ApiResourcesManager::fetchStaticIps(const std::string &authHash)
@@ -999,7 +1020,10 @@ void ApiResourcesManager::onAmneziawgUnblockParamsAnswer(ServerApiRetCode server
     std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setAmneziawgUnblockParams(jsonData);
-        callback_->call(ApiResourcesManagerNotification::kAmneziawgUnblockParamsFinished, LoginResult::kSuccess, std::string());
+        if (isLoginOkEmitted_)
+            callback_->call(ApiResourcesManagerNotification::kAmneziawgUnblockParamsFinished, LoginResult::kSuccess, std::string());
+        else
+            checkForReadyLogin();
     }
     lastUpdateTimeMs_[RequestType::kAmneziawgUnblockParams] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
     requestsInProgress_.erase(RequestType::kAmneziawgUnblockParams);
@@ -1055,6 +1079,7 @@ void ApiResourcesManager::clearValues()
     persistentSettings_.setPortMap(std::string());
     persistentSettings_.setStaticIps(std::string());
     persistentSettings_.setNotifications(std::string());
+    persistentSettings_.setAmneziawgUnblockParams(std::string());
 }
 
 } // namespace wsnet

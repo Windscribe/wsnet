@@ -26,27 +26,29 @@ InventoryServer parseServerObj(const rapidjson::Value &obj, bool &ok)
     InventoryServer srv;
     if (!obj.IsObject()) return srv;
 
-    if (!obj.HasMember("id")            || !obj["id"].IsInt()            ||
-        !obj.HasMember("hostname")      || !obj["hostname"].IsString()   ||
-        !obj.HasMember("ip")            || !obj["ip"].IsString()         ||
-        !obj.HasMember("ip2")           || !obj["ip2"].IsString()        ||
-        !obj.HasMember("ip3")           || !obj["ip3"].IsString()        ||
-        !obj.HasMember("datacenter_id") || !obj["datacenter_id"].IsInt() ||
-        !obj.HasMember("weight")        || !obj["weight"].IsInt()        ||
-        !obj.HasMember("health")        || !obj["health"].IsInt())
+    if (!obj.HasMember("id")       || !obj["id"].IsInt()       ||
+        !obj.HasMember("host")     || !obj["host"].IsString()  ||
+        !obj.HasMember("ip")       || !obj["ip"].IsString()    ||
+        !obj.HasMember("ip2")      || !obj["ip2"].IsString()   ||
+        !obj.HasMember("ip3")      || (!obj["ip3"].IsString() && !obj["ip3"].IsNull()) ||
+        !obj.HasMember("dc_id")    || !obj["dc_id"].IsInt()    ||
+        !obj.HasMember("weight")   || !obj["weight"].IsInt()   ||
+        !obj.HasMember("net_load") || !obj["net_load"].IsInt())
     {
-        g_logger->error("parseServerObj: missing required fields (id/hostname/ip/ip2/ip3/datacenter_id/weight/health)");
+        g_logger->error("parseServerObj: missing required fields (id/host/ip/ip2/ip3/dc_id/weight/net_load)");
         return srv;
     }
 
-    srv.id           = obj["id"].GetInt();
-    srv.hostname     = obj["hostname"].GetString();
-    srv.ip           = obj["ip"].GetString();
-    srv.ip2          = obj["ip2"].GetString();
-    srv.ip3          = obj["ip3"].GetString();
-    srv.datacenterId = obj["datacenter_id"].GetInt();
-    srv.weight       = obj["weight"].GetInt();
-    srv.health       = obj["health"].GetInt();
+    srv.id      = obj["id"].GetInt();
+    srv.host    = obj["host"].GetString();
+    srv.ip      = obj["ip"].GetString();
+    srv.ip2     = obj["ip2"].GetString();
+    srv.ip3     = obj["ip3"].IsString() ? obj["ip3"].GetString() : "";
+    srv.ipv6    = obj.HasMember("ipv6") && obj["ipv6"].IsInt() ? obj["ipv6"].GetInt() : 0;
+    srv.dcId    = obj["dc_id"].GetInt();
+    srv.weight  = obj["weight"].GetInt();
+    srv.netLoad = obj["net_load"].GetInt();
+    srv.sClass  = obj.HasMember("s_class") && obj["s_class"].IsInt() ? obj["s_class"].GetInt() : 0;
 
     ok = true;
     return srv;
@@ -214,14 +216,16 @@ std::string InventoryParser::serializeServers(const std::map<int, InventoryServe
     Value arr(kArrayType);
     for (const auto &[id, srv] : servers) {
         Value obj(kObjectType);
-        obj.AddMember("id",            srv.id,                                    alloc);
-        obj.AddMember("hostname",      Value(srv.hostname.c_str(),  alloc),       alloc);
-        obj.AddMember("ip",            Value(srv.ip.c_str(),        alloc),       alloc);
-        obj.AddMember("ip2",           Value(srv.ip2.c_str(),       alloc),       alloc);
-        obj.AddMember("ip3",           Value(srv.ip3.c_str(),       alloc),       alloc);
-        obj.AddMember("datacenter_id", srv.datacenterId,                          alloc);
-        obj.AddMember("weight",        srv.weight,                                alloc);
-        obj.AddMember("health",        srv.health,                                alloc);
+        obj.AddMember("id",       srv.id,                                alloc);
+        obj.AddMember("host",     Value(srv.host.c_str(), alloc),    alloc);
+        obj.AddMember("ip",       Value(srv.ip.c_str(),   alloc),    alloc);
+        obj.AddMember("ip2",      Value(srv.ip2.c_str(),  alloc),    alloc);
+        obj.AddMember("ip3",      Value(srv.ip3.c_str(),  alloc),    alloc);
+        obj.AddMember("ipv6",     srv.ipv6,                          alloc);
+        obj.AddMember("dc_id",    srv.dcId,                          alloc);
+        obj.AddMember("weight",   srv.weight,                        alloc);
+        obj.AddMember("net_load", srv.netLoad,                       alloc);
+        obj.AddMember("s_class",  srv.sClass,                        alloc);
         arr.PushBack(obj, alloc);
     }
     doc.AddMember("servers", arr, alloc);
@@ -376,7 +380,7 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
             group.ovpnX509    = dc.ovpnX509;
             group.linkSpeed   = dc.linkSpeed;
             group.dnsHostName = dc.ovpnX509;
-            group.health      = -1;
+            group.netLoad     = -1;
 
             auto it = dcServersMap.find(dc.id);
             if (it != dcServersMap.end() && !it->second.empty()) {
@@ -393,23 +397,24 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
                                              ^ (std::hash<int>{}(dc.id) << 1);
                 const auto &pingServer = *dcServers[pingSeed % dcServers.size()];
                 group.pingIp   = pingServer.ip;
-                group.pingHost = "http://" + pingServer.hostname + ":6464/latency";
+                group.pingHost = "http://" + pingServer.host + ":6464/latency";
 
-                // Average health across all servers in this datacenter.
-                int totalHealth = 0;
+                // Average net_load across all servers in this datacenter.
+                int totalNetLoad = 0;
                 for (const auto *srv : dcServers)
-                    totalHealth += srv->health;
-                group.health = static_cast<int>(totalHealth / static_cast<int>(dcServers.size()));
-                if (group.health < 0 || group.health > 100)
-                    group.health = -1;
+                    totalNetLoad += srv->netLoad;
+                group.netLoad = static_cast<int>(totalNetLoad / static_cast<int>(dcServers.size()));
+                if (group.netLoad < 0 || group.netLoad > 100)
+                    group.netLoad = -1;
 
                 for (const auto *srv : dcServers) {
                     ServerNode node;
-                    node.hostname = srv->hostname;
+                    node.host     = srv->host;
                     node.ip       = srv->ip;
                     node.ip2      = srv->ip2;
                     node.ip3      = srv->ip3;
                     node.weight   = srv->weight;
+                    node.ipv6     = srv->ipv6;
                     group.nodes.push_back(std::move(node));
                 }
             }
@@ -451,7 +456,7 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
 
             std::string pingIp;
             std::string pingHost;
-            int health = -1;
+            int netLoad = -1;
             rapidjson::Value jsonNodes(rapidjson::kArrayType);
 
             auto it = dcServersMap.find(dc.id);
@@ -469,23 +474,24 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
                                              ^ (std::hash<int>{}(dc.id) << 1);
                 const auto &pingServer = *dcServers[pingSeed % dcServers.size()];
                 pingIp   = pingServer.ip;
-                pingHost = "http://" + pingServer.hostname + ":6464/latency";
+                pingHost = "http://" + pingServer.host + ":6464/latency";
 
-                // Average health across all servers in this datacenter.
-                int totalHealth = 0;
+                // Average net_load across all servers in this datacenter.
+                int totalNetLoad = 0;
                 for (const auto *srv : dcServers)
-                    totalHealth += srv->health;
-                health = static_cast<int>(totalHealth / static_cast<int>(dcServers.size()));
-                if (health < 0 || health > 100)
-                    health = -1;
+                    totalNetLoad += srv->netLoad;
+                netLoad = static_cast<int>(totalNetLoad / static_cast<int>(dcServers.size()));
+                if (netLoad < 0 || netLoad > 100)
+                    netLoad = -1;
 
                 for (const auto *srv : dcServers) {
                     rapidjson::Value jsonNode(rapidjson::kObjectType);
-                    jsonNode.AddMember("hostname", rapidjson::Value(srv->hostname.c_str(), alloc), alloc);
+                    jsonNode.AddMember("host",     rapidjson::Value(srv->host.c_str(), alloc), alloc);
                     jsonNode.AddMember("ip",       rapidjson::Value(srv->ip.c_str(), alloc), alloc);
                     jsonNode.AddMember("ip2",      rapidjson::Value(srv->ip2.c_str(), alloc), alloc);
                     jsonNode.AddMember("ip3",      rapidjson::Value(srv->ip3.c_str(), alloc), alloc);
                     jsonNode.AddMember("weight",   srv->weight, alloc);
+                    jsonNode.AddMember("ipv6",     srv->ipv6, alloc);
                     jsonNodes.PushBack(std::move(jsonNode), alloc);
                 }
             }
@@ -500,7 +506,7 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
             jsonGroup.AddMember("wg_pub_key",    rapidjson::Value(dc.wgPubkey.c_str(), alloc), alloc);
             jsonGroup.AddMember("ovpn_x509",     rapidjson::Value(dc.ovpnX509.c_str(), alloc), alloc);
             jsonGroup.AddMember("link_speed",    dc.linkSpeed, alloc);
-            jsonGroup.AddMember("health",        health, alloc);
+            jsonGroup.AddMember("net_load",      netLoad, alloc);
             jsonGroup.AddMember("dns_host_name", rapidjson::Value(dc.ovpnX509.c_str(), alloc), alloc);
             jsonGroup.AddMember("nodes",         std::move(jsonNodes), alloc);
             jsonGroups.PushBack(std::move(jsonGroup), alloc);
@@ -533,7 +539,7 @@ std::shared_ptr<WSNetServerLocations> InventoryParser::buildServerLocations(
     // Build a datacenter_id → servers index for O(N log N) instead of O(N*M).
     DcServersMap dcServersMap;
     for (const auto &[id, srv] : servers)
-        dcServersMap[srv.datacenterId].push_back(&srv);
+        dcServersMap[srv.dcId].push_back(&srv);
 
     // WSNetServerLocations has private members; InventoryParser is a friend.
     auto result = std::shared_ptr<WSNetServerLocations>(new WSNetServerLocations());
