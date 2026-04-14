@@ -40,6 +40,7 @@ public:
 
     virtual void setConnectivityState(bool isOnline) = 0;
     virtual void setIsConnectedToVpnState(bool isConnected) = 0;
+    virtual void setLanguage(const std::string &language) = 0;
 
     virtual std::string currentPersistentSettings() = 0;
 

@@ -127,6 +127,11 @@ public:
         }
     }
 
+    void setLanguage(const std::string &language) override
+    {
+        Settings::instance().setLanguage(language);
+    }
+
     std::string currentPersistentSettings() override
     {
         return persistentSettings_->getAsString();
