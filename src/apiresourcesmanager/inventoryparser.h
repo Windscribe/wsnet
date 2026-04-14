@@ -122,7 +122,7 @@ public:
     // WSNetServerLocations object (the type consumed by client-desktop).
     //
     // Mapping: InventoryDatacenter → ServerGroup, InventoryServer → ServerNode.
-    // Datacenters with status != 1 or no servers in |servers| are skipped.
+    // Datacenters with no servers in |servers| will have empty node lists.
     // pingIp / pingHost are taken from the first server in each datacenter (pingHost is a full URL: http://<host>:6464/latency).
     // Group health is the average of all server net_load values in the datacenter.
     // Group.pro is always false (server-side filtering ensures access).

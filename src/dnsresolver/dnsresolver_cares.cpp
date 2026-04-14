@@ -297,7 +297,8 @@ DnsServers DnsResolver_cares::getDefaultSystemConfiguration()
     struct ares_options options;
     memset(&options, 0, sizeof(options));
     // ARES_FLAG_NO_DFLT_SVR flag => do not attempt to add a default local named server if there are no other servers available
-    int status = ares_init_options(&tempChannel, &options, ARES_FLAG_NO_DFLT_SVR);
+    options.flags = ARES_FLAG_NO_DFLT_SVR;
+    int status = ares_init_options(&tempChannel, &options, ARES_OPT_FLAGS);
     if (status != ARES_SUCCESS) {
         // Sometimes we see a bug on MacOS where c-ares cannot get the DNS configuration and uses the 127.0.0.1 address instead
         // To make c-ares return an error instead of using the 127.0.0.1 address, we use the flag ARES_FLAG_NO_DFLT_SVR in ares_init_options call above

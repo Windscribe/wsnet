@@ -121,13 +121,15 @@ test:wsnet:win:
   script:
     - pip3 install pproxy
     - Start-Process -NoNewWindow -PassThru pproxy
-    - Try {
-        build/test/Release/wsnet_test.exe --gtest_output=xml:report_win.xml
-      } Catch {
-          throw
-      } Finally {
-          Get-Process "pproxy" | Stop-Process -Force
+    - |
+      $testExitCode = 0
+      try {
+        & build/test/Release/wsnet_test.exe --gtest_output=xml:report_win.xml
+        $testExitCode = $LASTEXITCODE
+      } finally {
+        Get-Process "pproxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
       }
+      if ($testExitCode -ne 0) { exit $testExitCode }
   after_script:
     - Get-Process "pproxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; $true
   retry: 2

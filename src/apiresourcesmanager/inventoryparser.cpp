@@ -364,8 +364,6 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
         serverLoc.premiumOnly = loc.premiumOnly;
 
         for (const auto &dc : loc.datacenters) {
-            if (dc.status != 1) continue;
-
             ServerGroup group;
             group.id          = dc.id;
             group.city        = dc.city;
@@ -445,8 +443,6 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
         rapidjson::Value jsonGroups(rapidjson::kArrayType);
 
         for (const auto &dc : loc.datacenters) {
-            if (dc.status != 1) continue;
-
             if (dc.p2p == 0)
                 p2pLoc = 0;
 

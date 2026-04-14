@@ -161,6 +161,10 @@ public:
     virtual std::shared_ptr<WSNetCancelableCallback> passwordRecovery(const std::string &email, WSNetRequestFinishedCallback callback) = 0;
 
     virtual std::shared_ptr<WSNetCancelableCallback> amneziawgUnblockParams(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
+
+    // Generate a random username/password for use in the signup flow
+    virtual std::shared_ptr<WSNetCancelableCallback> generateRandomUsername(WSNetRequestFinishedCallback callback) = 0;
+    virtual std::shared_ptr<WSNetCancelableCallback> generateRandomPassword(WSNetRequestFinishedCallback callback) = 0;
 };
 
 } // namespace wsnet

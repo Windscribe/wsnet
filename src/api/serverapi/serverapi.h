@@ -119,6 +119,9 @@ public:
     std::shared_ptr<WSNetCancelableCallback> passwordRecovery(const std::string &email, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> amneziawgUnblockParams(const std::string &authHash, WSNetRequestFinishedCallback callback) override;
 
+    std::shared_ptr<WSNetCancelableCallback> generateRandomUsername(WSNetRequestFinishedCallback callback) override;
+    std::shared_ptr<WSNetCancelableCallback> generateRandomPassword(WSNetRequestFinishedCallback callback) override;
+
 private:
     std::unique_ptr<ServerAPI_impl> impl_;
     boost::asio::io_context &io_context_;

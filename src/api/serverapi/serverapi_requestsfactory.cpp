@@ -534,4 +534,18 @@ BaseRequest *serverapi_requests_factory::amneziawgUnblockParams(const std::strin
     return request;
 }
 
+BaseRequest *serverapi_requests_factory::generateRandomUsername(RequestFinishedCallback callback)
+{
+    std::map<std::string, std::string> extraParams;
+    auto request = new BaseRequest(HttpMethod::kGet, SubdomainType::kApi, RequestPriority::kNormal, "CredGenerator/username", extraParams, callback);
+    return request;
+}
+
+BaseRequest *serverapi_requests_factory::generateRandomPassword(RequestFinishedCallback callback)
+{
+    std::map<std::string, std::string> extraParams;
+    auto request = new BaseRequest(HttpMethod::kGet, SubdomainType::kApi, RequestPriority::kNormal, "CredGenerator/password", extraParams, callback);
+    return request;
+}
+
 } // namespace wsnet

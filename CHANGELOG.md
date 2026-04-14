@@ -1,4 +1,14 @@
+1.5.5 (07/04/2026)
+All:
+   * Added generateRandomUsername() and generateRandomPassword() methods to ServerAPI for signup flow credential generation.
+   * Fixed a bug in the call to ares_init_options.
+   * Fixed c-ares regression by downgrading back to 1.34.5 and applying the security patch in the portfile.
+   * Removed client-side datacenter status filter from server list parsing, now handled server-side.
+
+
 1.5.4 (31/03/2026)
+All:
+   * Updated openSSL (3.6.1), cURL (8.19.0), c-ares (1.34.6)
 Android:
    * Revert WhitelistSocketFds callback functionality.
 
