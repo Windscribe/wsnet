@@ -33,6 +33,8 @@ public:
 
     void setProxySettings(const std::string &address, const std::string &username, const std::string &password);
 
+    void setWhitelistSocketsCallback(std::shared_ptr<CancelableCallback<WSNetHttpNetworkManagerWhitelistSocketsCallback> > callback);
+
 private:
     void run();
 
@@ -87,9 +89,15 @@ private:
     CURLM *multiHandle_;
     std::map<std::uint64_t, RequestInfo *> activeRequests_;
 
+    std::mutex mutexForWhiteListSockets_; // this mutex protects whitelistSocketsCallback_ variable
+    std::shared_ptr<CancelableCallback<WSNetHttpNetworkManagerWhitelistSocketsCallback> > whitelistSocketsCallback_;
+    std::set<int> whitelistSockets_;
+
     static CURLcode sslctx_function(CURL *curl, void *sslctx, void *parm);
     static size_t writeDataCallback(void *ptr, size_t size, size_t count, void *ri);
     static int progressCallback(void *ri,   curl_off_t dltotal,   curl_off_t dlnow,   curl_off_t ultotal,   curl_off_t ulnow);
+    static int curlSocketCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);
+    static int curlCloseSocketCallback(void *clientp, curl_socket_t curlfd);
     static int curlTrace(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp);
 
     bool setupOptions(RequestInfo *requestInfo, const std::shared_ptr<WSNetHttpRequest> &request, const std::vector<std::string> &ips, std::uint32_t timeoutMs);

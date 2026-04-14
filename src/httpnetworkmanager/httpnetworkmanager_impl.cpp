@@ -62,6 +62,11 @@ void HttpNetworkManager_impl::setWhitelistIpsCallback(std::shared_ptr<Cancelable
     isWhitelistCallbackChanged_ = true;
 }
 
+void HttpNetworkManager_impl::setWhitelistSocketsCallback(std::shared_ptr<CancelableCallback<WSNetHttpNetworkManagerWhitelistSocketsCallback> > callback)
+{
+    curlNetworkManager_.setWhitelistSocketsCallback(callback);
+}
+
 void HttpNetworkManager_impl::clearDnsCache()
 {
     dnsCache_.clear();

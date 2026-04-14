@@ -67,6 +67,22 @@ std::shared_ptr<WSNetCancelableCallback> HttpNetworkManager::setWhitelistIpsCall
     }
 }
 
+std::shared_ptr<WSNetCancelableCallback> HttpNetworkManager::setWhitelistSocketsCallback(WSNetHttpNetworkManagerWhitelistSocketsCallback whitelistSocketsCallback)
+{
+    if (whitelistSocketsCallback) {
+        auto cancelableCallback = std::make_shared<CancelableCallback<WSNetHttpNetworkManagerWhitelistSocketsCallback>>(whitelistSocketsCallback);
+        boost::asio::post(io_context_, [this, cancelableCallback] {
+            impl_.setWhitelistSocketsCallback(cancelableCallback);
+        });
+        return cancelableCallback;
+    } else {
+        boost::asio::post(io_context_, [this] {
+            impl_.setWhitelistSocketsCallback(nullptr);
+        });
+        return nullptr;
+    }
+}
+
 void HttpNetworkManager::clearDnsCache()
 {
     boost::asio::post(io_context_, [this] {

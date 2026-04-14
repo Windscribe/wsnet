@@ -27,6 +27,7 @@ public:
                           const std::string &username, const std::string &password);
 
     void setWhitelistIpsCallback(std::shared_ptr<CancelableCallback<WSNetHttpNetworkManagerWhitelistIpsCallback> > callback);
+    void setWhitelistSocketsCallback(std::shared_ptr<CancelableCallback<WSNetHttpNetworkManagerWhitelistSocketsCallback> > callback);
 
     void clearDnsCache();
 

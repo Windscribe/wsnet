@@ -1,3 +1,8 @@
+1.5.4 (31/03/2026)
+Android:
+   * Revert WhitelistSocketFds callback functionality.
+
+
 1.5.2 (30/03/2026)
 All:
    * Moved p2p field from ServerLocation to ServerGroup for per-datacenter granularity.

@@ -68,6 +68,11 @@ public:
     // this callback function must return control after the firewall is configured
     // you can pass null to disable the callback function
     virtual std::shared_ptr<WSNetCancelableCallback> setWhitelistIpsCallback(WSNetHttpNetworkManagerWhitelistIpsCallback whitelistIpsCallback) = 0;
+
+    // callback function allowing the caller to add sockets to the firewall exceptions (Android specific)
+    // this callback function must return control after the firewall is configured
+    // you can pass null to disable the callback function
+    virtual std::shared_ptr<WSNetCancelableCallback> setWhitelistSocketsCallback(WSNetHttpNetworkManagerWhitelistSocketsCallback whitelistSocketsCallback) = 0;
 };
 
 } // namespace wsnet
