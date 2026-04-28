@@ -7,7 +7,7 @@
 namespace wsnet {
 
 ServerAPI::ServerAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManager *httpNetworkManager, IFailoverContainer *failoverContainer,
-                     PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, ConnectState &connectState) :
+                     PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState) :
     io_context_(io_context),
     persistentSettings_(persistentSettings),
     advancedParameters_(advancedParameters),
@@ -15,12 +15,12 @@ ServerAPI::ServerAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManage
     pingTest_(httpNetworkManager)
 {
     impl_ = std::make_unique<ServerAPI_impl>(httpNetworkManager, failoverContainer, persistentSettings_, advancedParameters, connectState);
-    subscriberId_ = connectState_.subscribeConnectedToVpnState(std::bind(&ServerAPI::onVPNConnectStateChanged, this, std::placeholders::_1));
+    subscriberId_ = connectState_->subscribeConnectedToVpnState(std::bind(&ServerAPI::onVPNConnectStateChanged, this, std::placeholders::_1));
 }
 
 ServerAPI::~ServerAPI()
 {
-    connectState_.unsubscribeConnectedToVpnState(subscriberId_);
+    connectState_->unsubscribeConnectedToVpnState(subscriberId_);
 }
 
 void ServerAPI::setApiResolutionsSettings(const std::string &apiRoot, const std::string &assetsRoot)

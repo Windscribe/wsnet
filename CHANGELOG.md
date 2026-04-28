@@ -1,3 +1,19 @@
+1.5.6.3 (22/04/2026)
+All:
+   * Fixed Bridge API session tokens not being cleared during logout and persistent settings cleanup.
+   * Fixed use-after-free crash when API handles outlive global WSNet teardown.
+
+
+1.5.6.2 (20/04/2026)
+All:
+   * Replace the hostname with the IP-address for HTTP ping.
+
+
+1.5.6.1 (17/04/2026)
+All:
+   * Fixed ALC purchased locations shown as disabled after app launch.
+
+
 1.5.6 (11/04/2026)
 All:
    * Expose inventory datacenter `status` in server locations (`ServerGroup::status` on desktop; `status` and per-datacenter `p2p` on each group in `locationsJson()` on mobile).
@@ -31,7 +47,7 @@ All:
 1.4.9 (09/03/2026)
 All:
    * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo. #9
-   * Added support for the new server list v2 API (inventory-based). https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1594
+   * Added support for the new server list v2 API (inventory-based).
 
 
 1.4.8 (24/02/2026)

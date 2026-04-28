@@ -13,7 +13,7 @@ using namespace std::chrono;
 // ---------------------------------------------------------------------------
 
 ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WSNetServerAPI *serverAPI,
-                                         PersistentSettings &persistentSettings, ConnectState &connectState)
+                                         PersistentSettings &persistentSettings, std::shared_ptr<ConnectState> connectState)
     : io_context_(io_context),
       fetchTimer_(io_context, boost::asio::chrono::seconds(1)),
       serverAPI_(serverAPI),
@@ -21,6 +21,7 @@ ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WS
       connectState_(connectState)
 {
     sessionStatus_.reset(SessionStatus::createFromJson(persistentSettings_.sessionStatus()));
+    prevSessionStatus_.reset(SessionStatus::createFromJson(persistentSettings_.sessionStatus()));
 
     // Restore inventory v2 state from persistent settings.
     inventoryLocations_ = InventoryParser::parseLocations(persistentSettings_.invLocations());
@@ -451,7 +452,7 @@ void ApiResourcesManager::checkForServerCredentialsFetchFinished()
 void ApiResourcesManager::fetchAll()
 {
     // Session — with current inv_rev for delta delivery.
-    if (connectState_.isVPNConnected()) {
+    if (connectState_->isVPNConnected()) {
         if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInConnectedStateMs_) || forceRefetchSessionStatus_)
             if (fetchSession(persistentSettings_.authHash())) {
                 forceRefetchSessionStatus_ = false;
@@ -697,6 +698,7 @@ void ApiResourcesManager::updateSessionStatus()
         }
     } else {
         g_logger->info("update session status (changed since last call)");
+        fetchInventoryServers();
         sessionStatus_->debugLog();
     }
 
@@ -1080,6 +1082,7 @@ void ApiResourcesManager::clearValues()
     persistentSettings_.setStaticIps(std::string());
     persistentSettings_.setNotifications(std::string());
     persistentSettings_.setAmneziawgUnblockParams(std::string());
+    persistentSettings_.setSessionTokens({});
 }
 
 } // namespace wsnet

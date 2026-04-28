@@ -23,7 +23,7 @@ namespace wsnet {
 class PingManager : public WSNetPingManager
 {
 public:
-    explicit PingManager(boost::asio::io_context &io_context, WSNetHttpNetworkManager *httpNetworkManager, WSNetAdvancedParameters *advancedParameters, ConnectState &connectState);
+    explicit PingManager(boost::asio::io_context &io_context, WSNetHttpNetworkManager *httpNetworkManager, WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState);
     virtual ~PingManager();
 
     std::shared_ptr<WSNetCancelableCallback> ping(const std::string &ip, const std::string &hostname,
@@ -43,7 +43,7 @@ private:
     // Required for ICMP pings for unix systems
     std::unique_ptr<ProcessManager> processManager_;
 #endif
-    ConnectState &connectState_;
+    std::shared_ptr<ConnectState> connectState_;
     std::mutex mutex_;
     std::uint64_t curPingId_ = 0;
     std::queue<std::uint64_t> queue_;

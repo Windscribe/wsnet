@@ -392,7 +392,7 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
                                              ^ (std::hash<int>{}(dc.id) << 1);
                 const auto &pingServer = *dcServers[pingSeed % dcServers.size()];
                 group.pingIp   = pingServer.ip;
-                group.pingHost = "http://" + pingServer.host + ":6464/latency";
+                group.pingHost = "http://" + pingServer.ip + ":6464/latency";
 
                 // Average net_load across all servers in this datacenter.
                 int totalNetLoad = 0;
@@ -467,7 +467,7 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
                                              ^ (std::hash<int>{}(dc.id) << 1);
                 const auto &pingServer = *dcServers[pingSeed % dcServers.size()];
                 pingIp   = pingServer.ip;
-                pingHost = "http://" + pingServer.host + ":6464/latency";
+                pingHost = "http://" + pingServer.ip + ":6464/latency";
 
                 // Average net_load across all servers in this datacenter.
                 int totalNetLoad = 0;

@@ -7,7 +7,7 @@ namespace wsnet {
 
 ServerLocationsRequest::ServerLocationsRequest(RequestPriority priority, const std::string &name,
         std::map<std::string, std::string> extraParams, PersistentSettings &persistentSettings,
-        ConnectState &connectState, WSNetAdvancedParameters *advancedParameters, RequestFinishedCallback callback) :
+        std::shared_ptr<ConnectState> connectState, WSNetAdvancedParameters *advancedParameters, RequestFinishedCallback callback) :
     BaseRequest(HttpMethod::kGet, SubdomainType::kAssets, priority, name, extraParams, callback),
     persistentSettings_(persistentSettings),
     connectState_(connectState),
@@ -17,7 +17,7 @@ ServerLocationsRequest::ServerLocationsRequest(RequestPriority priority, const s
 
 std::string ServerLocationsRequest::url(const std::string &domain) const
 {
-    isFromDisconnectedVPNState_ = !connectState_.isVPNConnected();
+    isFromDisconnectedVPNState_ = !connectState_->isVPNConnected();
 
     auto url = skyr::url("https://" + hostname(domain, subDomainType_) + "/" + name());
     auto &sp = url.search_parameters();
@@ -34,7 +34,7 @@ std::string ServerLocationsRequest::url(const std::string &domain) const
     else {
         if (!advancedParameters_->countryOverrideValue().empty()) {
             countryOverride = advancedParameters_->countryOverrideValue();
-        } else if (connectState_.isVPNConnected()) {
+        } else if (connectState_->isVPNConnected()) {
             if (!persistentSettings_.countryOverride().empty()) {
                 countryOverride = persistentSettings_.countryOverride();
             }
@@ -81,13 +81,13 @@ void ServerLocationsRequest::handle(const std::string &arr)
         auto jsonInfo = jsonObject["info"].GetObject();
 
         if (jsonInfo.HasMember("country_override")) {
-            if (isFromDisconnectedVPNState_ && (!connectState_.isVPNConnected())) {
+            if (isFromDisconnectedVPNState_ && (!connectState_->isVPNConnected())) {
                 auto countryOverride = jsonInfo["country_override"].GetString();
                 persistentSettings_.setCountryOverride(countryOverride);
                 g_logger->info("API request ServerLocations saved countryOverride = {}", countryOverride);
             }
         } else {
-            if (isFromDisconnectedVPNState_ && (!connectState_.isVPNConnected())) {
+            if (isFromDisconnectedVPNState_ && (!connectState_->isVPNConnected())) {
                 persistentSettings_.setCountryOverride(std::string());
                 g_logger->info("API request ServerLocations removed countryOverride flag");
             }

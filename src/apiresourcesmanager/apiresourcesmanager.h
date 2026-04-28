@@ -31,7 +31,7 @@ enum class RequestType {
 class ApiResourcesManager : public WSNetApiResourcesManager
 {
 public:
-    explicit ApiResourcesManager(boost::asio::io_context &io_context, WSNetServerAPI *serverAPI, PersistentSettings &persistentSettings, ConnectState &connectState);
+    explicit ApiResourcesManager(boost::asio::io_context &io_context, WSNetServerAPI *serverAPI, PersistentSettings &persistentSettings, std::shared_ptr<ConnectState> connectState);
     virtual ~ApiResourcesManager();
 
     std::shared_ptr<WSNetCancelableCallback> setCallback(WSNetApiResourcesManagerCallback callback) override;
@@ -94,7 +94,7 @@ private:
     boost::asio::steady_timer fetchTimer_;
     WSNetServerAPI *serverAPI_;
     PersistentSettings &persistentSettings_;
-    ConnectState &connectState_;
+    std::shared_ptr<ConnectState> connectState_;
 
     std::unique_ptr<SessionStatus> sessionStatus_;
     std::unique_ptr<SessionStatus> prevSessionStatus_;

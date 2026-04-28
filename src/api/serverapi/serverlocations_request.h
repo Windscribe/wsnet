@@ -16,7 +16,7 @@ class ServerLocationsRequest : public BaseRequest
 public:
     explicit ServerLocationsRequest(RequestPriority priority, const std::string &name,
                                     std::map<std::string, std::string> extraParams, PersistentSettings &persistentSettings,
-                                    ConnectState &connectState, WSNetAdvancedParameters *advancedParameters, RequestFinishedCallback callback);
+                                    std::shared_ptr<ConnectState> connectState, WSNetAdvancedParameters *advancedParameters, RequestFinishedCallback callback);
     virtual ~ServerLocationsRequest() {};
 
     std::string url(const std::string &domain) const override;
@@ -26,7 +26,7 @@ public:
 private:
     PersistentSettings &persistentSettings_;
     mutable bool isFromDisconnectedVPNState_;
-    ConnectState &connectState_;
+    std::shared_ptr<ConnectState> connectState_;
     WSNetAdvancedParameters *advancedParameters_;
 };
 

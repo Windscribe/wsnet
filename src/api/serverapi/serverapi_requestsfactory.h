@@ -15,7 +15,7 @@ namespace serverapi_requests_factory
     BaseRequest *claimVoucherCode(const std::string &authHash, const std::string &voucherCode, RequestFinishedCallback callback);
     BaseRequest *deleteSession(const std::string &authHash, RequestFinishedCallback callback);
     BaseRequest *serverLocations(PersistentSettings &persistentSettings, const std::string &language, const std::string &revision,
-                                 bool isPro, const std::vector<std::string> &alcList, ConnectState &connectState, WSNetAdvancedParameters *advancedParameters,
+                                 bool isPro, const std::vector<std::string> &alcList, std::shared_ptr<ConnectState> connectState, WSNetAdvancedParameters *advancedParameters,
                                  RequestFinishedCallback callback);
     BaseRequest *getLocations(const std::string &authHash, RequestFinishedCallback callback);
     BaseRequest *getServers(const std::string &authHash, std::int32_t backup, RequestFinishedCallback callback);
