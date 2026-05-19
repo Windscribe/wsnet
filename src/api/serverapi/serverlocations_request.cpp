@@ -78,9 +78,13 @@ void ServerLocationsRequest::handle(const std::string &arr)
             return;
         }
 
+        if (!jsonObject["info"].IsObject()) {
+            setRetCode(ServerApiRetCode::kIncorrectJson);
+            return;
+        }
         auto jsonInfo = jsonObject["info"].GetObject();
 
-        if (jsonInfo.HasMember("country_override")) {
+        if (jsonInfo.HasMember("country_override") && jsonInfo["country_override"].IsString()) {
             if (isFromDisconnectedVPNState_ && (!connectState_->isVPNConnected())) {
                 auto countryOverride = jsonInfo["country_override"].GetString();
                 persistentSettings_.setCountryOverride(countryOverride);

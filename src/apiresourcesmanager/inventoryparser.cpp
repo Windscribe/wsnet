@@ -157,8 +157,9 @@ std::vector<InventoryLocation> InventoryParser::parseLocations(const std::string
 
 bool InventoryParser::parseServers(const std::string &json,
                                    std::map<int, InventoryServer> &servers,
-                                   std::int64_t &revision)
+                                   std::int64_t &revision, std::string &amneziawgConfigId)
 {
+    amneziawgConfigId.clear();
     if (json.empty()) return false;
 
     using namespace rapidjson;
@@ -186,6 +187,10 @@ bool InventoryParser::parseServers(const std::string &json,
         return false;
     }
     revision = data["revision"].GetInt64();
+
+    if (data.HasMember("amneziawg_config_id") && data["amneziawg_config_id"].IsString()) {
+        amneziawgConfigId = data["amneziawg_config_id"].GetString();
+    }
 
     servers.clear();
     for (const auto &srvVal : data["servers"].GetArray()) {
@@ -314,6 +319,10 @@ ServerInventoryDelta InventoryParser::parseDelta(const std::string &sessionJson)
     }
 
     delta.revision = inv["revision"].GetInt64();
+
+    if (inv.HasMember("amneziawg_config_id") && inv["amneziawg_config_id"].IsString()) {
+        delta.amneziawgConfigId = inv["amneziawg_config_id"].GetString();
+    }
 
     const std::string action = inv["action"].GetString();
 

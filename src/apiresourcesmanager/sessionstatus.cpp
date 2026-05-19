@@ -9,8 +9,9 @@ namespace {
             return std::string();
         if (obj[name.c_str()].IsNull())
             return std::string();
+        if (!obj[name.c_str()].IsString())
+            return std::string();
 
-        assert(obj[name.c_str()].IsString());
         return obj[name.c_str()].GetString();
     }
 }
@@ -32,7 +33,7 @@ SessionStatus *SessionStatus::createFromJson(const std::string &json)
     SessionStatus *ss = new SessionStatus;
     auto jsonObj = doc.GetObject();
 
-    if (jsonObj.HasMember("errorCode")) {
+    if (jsonObj.HasMember("errorCode") && jsonObj["errorCode"].IsInt()) {
         int errorCode = jsonObj["errorCode"].GetInt();
 
         switch (errorCode)
@@ -89,6 +90,10 @@ SessionStatus *SessionStatus::createFromJson(const std::string &json)
         return ss;
     }
 
+    if (!jsonObj.HasMember("data") || !jsonObj["data"].IsObject()) {
+        delete ss;
+        return nullptr;
+    }
     auto data = jsonObj["data"].GetObject();
 
     // check for required fields in json
@@ -99,6 +104,14 @@ SessionStatus *SessionStatus::createFromJson(const std::string &json)
             delete ss;
             return nullptr;
         }
+
+    // Validate numeric field types before accessing
+    if (!data["status"].IsInt() || !data["is_premium"].IsInt() || !data["billing_plan_id"].IsInt() ||
+        !data["traffic_used"].IsInt64() || !data["traffic_max"].IsInt64() || !data["email_status"].IsInt()) {
+        g_logger->error("SessionStatus::createFromJson: required numeric fields have unexpected types");
+        delete ss;
+        return nullptr;
+    }
 
     if (data.HasMember("session_auth_hash"))
         ss->authHash_ = safeGetString(data, "session_auth_hash");
@@ -116,7 +129,7 @@ SessionStatus *SessionStatus::createFromJson(const std::string &json)
 
     ss->revisionHash_ = safeGetString(data, "loc_hash");
 
-    if (data.HasMember("rebill"))
+    if (data.HasMember("rebill") && data["rebill"].IsInt())
         ss->rebill_ = data["rebill"].GetInt();
     else
         ss->rebill_ = 0;
@@ -132,7 +145,8 @@ SessionStatus *SessionStatus::createFromJson(const std::string &json)
     if (data.HasMember("alc") && data["alc"].IsArray()) {
         auto alcArray = data["alc"].GetArray();
         for (auto it = alcArray.begin(); it != alcArray.end(); ++it) {
-            ss->alc_.push_back(it->GetString());
+            if (it->IsString())
+                ss->alc_.push_back(it->GetString());
         }
     }
 
@@ -140,13 +154,14 @@ SessionStatus *SessionStatus::createFromJson(const std::string &json)
     ss->staticIpsUpdateDevices_.clear();
     if (data.HasMember("sip") && data["sip"].IsObject()) {
         auto objSip = data["sip"].GetObject();
-        if (objSip.HasMember("count")) {
+        if (objSip.HasMember("count") && objSip["count"].IsInt()) {
             ss->staticIps_ = objSip["count"].GetInt();
         }
         if (objSip.HasMember("update") && objSip["update"].IsArray()) {
             auto jsonUpdateIps = objSip["update"].GetArray();
             for (auto it = jsonUpdateIps.begin(); it != jsonUpdateIps.end(); ++it) {
-                ss->staticIpsUpdateDevices_.insert(it->GetString());
+                if (it->IsString())
+                    ss->staticIpsUpdateDevices_.insert(it->GetString());
             }
         }
     }

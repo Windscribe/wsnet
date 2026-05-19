@@ -81,6 +81,7 @@ public:
     std::string checkUpdate() const override;
     std::string authTokenResult() const override;
     std::string amneziawgUnblockParams() const override;
+    std::string amneziawgConfigId() const override;
 
     void setUpdateIntervals(int sessionInDisconnectedStateMs, int sessionInConnectedStateMs,
                             int locationsMs, int staticIpsMs, int serverConfigsAndCredentialsMs,

@@ -267,6 +267,7 @@ std::string ApiResourcesManager::serverCredentialsIkev2() const { return persist
 std::string ApiResourcesManager::serverConfigs() const   { return persistentSettings_.serverConfigs(); }
 std::string ApiResourcesManager::notifications() const   { return persistentSettings_.notifications(); }
 std::string ApiResourcesManager::amneziawgUnblockParams() const { return persistentSettings_.amneziawgUnblockParams(); }
+std::string ApiResourcesManager::amneziawgConfigId() const { return persistentSettings_.amneziawgConfigId(); }
 
 std::shared_ptr<WSNetServerLocations> ApiResourcesManager::serverLocations() const
 {
@@ -318,6 +319,12 @@ bool ApiResourcesManager::rebuildServerLocations()
 bool ApiResourcesManager::applyInventoryDelta(const std::string &sessionJson)
 {
     ServerInventoryDelta delta = InventoryParser::parseDelta(sessionJson);
+
+    if (delta.amneziawgConfigId != persistentSettings_.amneziawgConfigId()) {
+        persistentSettings_.setAmneziawgConfigId(delta.amneziawgConfigId);
+        g_logger->info("ApiResourcesManager: amneziawg_config_id updated to {}", delta.amneziawgConfigId);
+        callback_->call(ApiResourcesManagerNotification::kAmneziawgConfigIdUpdated, LoginResult::kSuccess, std::string());
+    }
 
     if (delta.action == ServerInventoryDelta::Action::kNone)
         return false;
@@ -890,8 +897,16 @@ void ApiResourcesManager::onInventoryServersAnswer(ServerApiRetCode serverApiRet
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         std::map<int, InventoryServer> newServers;
         std::int64_t newRevision = 0;
+        std::string amneziawgConfigId;
 
-        if (InventoryParser::parseServers(jsonData, newServers, newRevision)) {
+        if (InventoryParser::parseServers(jsonData, newServers, newRevision, amneziawgConfigId)) {
+
+            if (amneziawgConfigId != persistentSettings_.amneziawgConfigId()) {
+                persistentSettings_.setAmneziawgConfigId(amneziawgConfigId);
+                g_logger->info("ApiResourcesManager: amneziawg_config_id updated to {}", amneziawgConfigId);
+                callback_->call(ApiResourcesManagerNotification::kAmneziawgConfigIdUpdated, LoginResult::kSuccess, std::string());
+            }
+
             bool serversChanged = (newServers != inventoryServers_);
 
             // Always persist the new revision — it may advance even without server changes.
@@ -1082,6 +1097,7 @@ void ApiResourcesManager::clearValues()
     persistentSettings_.setStaticIps(std::string());
     persistentSettings_.setNotifications(std::string());
     persistentSettings_.setAmneziawgUnblockParams(std::string());
+    persistentSettings_.setAmneziawgConfigId(std::string());
     persistentSettings_.setSessionTokens({});
 }
 

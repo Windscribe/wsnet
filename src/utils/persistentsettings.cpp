@@ -28,35 +28,37 @@ PersistentSettings::PersistentSettings(const std::string &settings)
             return;
         }
 
-        if (jsonObject.HasMember("flvId"))
+        if (jsonObject.HasMember("flvId") && jsonObject["flvId"].IsString())
             failoverId_ = jsonObject["flvId"].GetString();
-        if (jsonObject.HasMember("countryOverride"))
+        if (jsonObject.HasMember("countryOverride") && jsonObject["countryOverride"].IsString())
             countryOverride_ = jsonObject["countryOverride"].GetString();
 
-        if (jsonObject.HasMember("authHash"))
+        if (jsonObject.HasMember("authHash") && jsonObject["authHash"].IsString())
             authHash_ = jsonObject["authHash"].GetString();
-        if (jsonObject.HasMember("sessionStatus"))
+        if (jsonObject.HasMember("sessionStatus") && jsonObject["sessionStatus"].IsString())
             sessionStatus_ = jsonObject["sessionStatus"].GetString();
-        if (jsonObject.HasMember("invLocations"))
+        if (jsonObject.HasMember("invLocations") && jsonObject["invLocations"].IsString())
             invLocations_ = jsonObject["invLocations"].GetString();
-        if (jsonObject.HasMember("invServers"))
+        if (jsonObject.HasMember("invServers") && jsonObject["invServers"].IsString())
             invServers_ = jsonObject["invServers"].GetString();
         if (jsonObject.HasMember("invRevision") && jsonObject["invRevision"].IsInt64())
             invRevision_ = jsonObject["invRevision"].GetInt64();
-        if (jsonObject.HasMember("serverCredentialsOvpn"))
+        if (jsonObject.HasMember("serverCredentialsOvpn") && jsonObject["serverCredentialsOvpn"].IsString())
             serverCredentialsOvpn_ = jsonObject["serverCredentialsOvpn"].GetString();
-        if (jsonObject.HasMember("serverCredentialsIkev2"))
+        if (jsonObject.HasMember("serverCredentialsIkev2") && jsonObject["serverCredentialsIkev2"].IsString())
             serverCredentialsIkev2_ = jsonObject["serverCredentialsIkev2"].GetString();
-        if (jsonObject.HasMember("serverConfigs"))
+        if (jsonObject.HasMember("serverConfigs") && jsonObject["serverConfigs"].IsString())
             serverConfigs_ = jsonObject["serverConfigs"].GetString();
-        if (jsonObject.HasMember("portMap"))
+        if (jsonObject.HasMember("portMap") && jsonObject["portMap"].IsString())
             portMap_ = jsonObject["portMap"].GetString();
-        if (jsonObject.HasMember("staticIps"))
+        if (jsonObject.HasMember("staticIps") && jsonObject["staticIps"].IsString())
             staticIps_ = jsonObject["staticIps"].GetString();
-        if (jsonObject.HasMember("notifications"))
+        if (jsonObject.HasMember("notifications") && jsonObject["notifications"].IsString())
             notifications_ = jsonObject["notifications"].GetString();
-        if (jsonObject.HasMember("amneziawgUnblockParams"))
+        if (jsonObject.HasMember("amneziawgUnblockParams") && jsonObject["amneziawgUnblockParams"].IsString())
             amneziawgUnblockParams_ = jsonObject["amneziawgUnblockParams"].GetString();
+        if (jsonObject.HasMember("amneziawgConfigId"))
+            amneziawgConfigId_ = jsonObject["amneziawgConfigId"].GetString();
         if (jsonObject.HasMember("sessionToken")) {
             if (jsonObject["sessionToken"].IsObject()) {
                 auto now = std::chrono::system_clock::now();
@@ -255,6 +257,18 @@ std::string PersistentSettings::amneziawgUnblockParams() const
     return amneziawgUnblockParams_;
 }
 
+void PersistentSettings::setAmneziawgConfigId(const std::string &amneziawgConfigId)
+{
+    std::lock_guard locker(mutex_);
+    amneziawgConfigId_ = amneziawgConfigId;
+}
+
+std::string PersistentSettings::amneziawgConfigId() const
+{
+    std::lock_guard locker(mutex_);
+    return amneziawgConfigId_;
+}
+
 void PersistentSettings::setSessionTokens(const std::map<std::string, std::pair<std::string, std::int64_t>> &sessionTokens)
 {
     std::lock_guard locker(mutex_);
@@ -304,6 +318,9 @@ std::string PersistentSettings::getAsString() const
         doc.AddMember("notifications", StringRef(notifications_.c_str()), doc.GetAllocator());
     if (!amneziawgUnblockParams_.empty())
         doc.AddMember("amneziawgUnblockParams", StringRef(amneziawgUnblockParams_.c_str()), doc.GetAllocator());
+    if (!amneziawgConfigId_.empty())
+        doc.AddMember("amneziawgConfigId", StringRef(amneziawgConfigId_.c_str()), doc.GetAllocator());
+
     if (!sessionTokens_.empty()) {
         Value tokenObj(kObjectType);
         for (const auto& [key, tokenPair] : sessionTokens_) {

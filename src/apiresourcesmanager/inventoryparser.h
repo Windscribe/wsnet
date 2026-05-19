@@ -87,6 +87,7 @@ struct ServerInventoryDelta {
     std::vector<InventoryServer> enabled;
     std::vector<int>           disabled;   // server IDs to remove
     std::int64_t               revision = 0;
+    std::string                amneziawgConfigId;   // recommended geolocation-based AmneziaWG config
 };
 
 // ---------------------------------------------------------------------------
@@ -104,7 +105,7 @@ public:
     // Returns false on parse failure.
     static bool parseServers(const std::string &json,
                              std::map<int, InventoryServer> &servers,
-                             std::int64_t &revision);
+                             std::int64_t &revision, std::string &amneziawgConfigId);
 
     // Serialize in-memory server state to a compact JSON blob for persistence.
     static std::string serializeServers(const std::map<int, InventoryServer> &servers,

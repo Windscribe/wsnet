@@ -62,6 +62,9 @@ public:
     void setAmneziawgUnblockParams(const std::string &amneziawgUnblockParams);
     std::string amneziawgUnblockParams() const;
 
+    void setAmneziawgConfigId(const std::string &amneziawgConfigId);
+    std::string amneziawgConfigId() const;
+
     void setSessionTokens(const std::map<std::string, std::pair<std::string, std::int64_t>> &sessionTokens);
     std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens() const;
 
@@ -86,6 +89,7 @@ private:
     std::string staticIps_;
     std::string notifications_;
     std::string amneziawgUnblockParams_;
+    std::string amneziawgConfigId_;
     std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens_;
 
     mutable std::mutex mutex_;

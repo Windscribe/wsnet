@@ -1,3 +1,9 @@
+1.5.6.4 (30/04/2026)
+All:
+   * Added RapidJSON type safety checks across all JSON parsers to prevent assertion failures on unexpected value types. Hardens pingmethod_http, persistentsettings, serverlocations_request, echfailover, accessipsfailover, dynamicdomainfailover, and sessionstatus against malformed or tampered responses.
+   * Added amneziawg_config_id tracking from the server inventory API.
+
+
 1.5.6.3 (22/04/2026)
 All:
    * Fixed Bridge API session tokens not being cleared during logout and persistent settings cleanup.
@@ -6,12 +12,12 @@ All:
 
 1.5.6.2 (20/04/2026)
 All:
-   * Replace the hostname with the IP-address for HTTP ping.
+   * Replace the hostname with the IP-address for HTTP ping.https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1764
 
 
 1.5.6.1 (17/04/2026)
 All:
-   * Fixed ALC purchased locations shown as disabled after app launch.
+   * Fixed ALC purchased locations shown as disabled after app launch, https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1759.
 
 
 1.5.6 (11/04/2026)
@@ -47,7 +53,7 @@ All:
 1.4.9 (09/03/2026)
 All:
    * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo. #9
-   * Added support for the new server list v2 API (inventory-based).
+   * Added support for the new server list v2 API (inventory-based). https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1594
 
 
 1.4.8 (24/02/2026)

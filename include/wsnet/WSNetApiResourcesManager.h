@@ -24,7 +24,8 @@ enum class ApiResourcesManagerNotification {
     kCheckUpdate,
     kLogoutFinished,
     kAuthTokenFinished,
-    kAmneziawgUnblockParamsFinished
+    kAmneziawgUnblockParamsFinished,
+    kAmneziawgConfigIdUpdated
 };
 
 enum class LoginResult {
@@ -138,6 +139,7 @@ public:
     virtual std::string checkUpdate() const = 0;
     virtual std::string authTokenResult() const = 0;
     virtual std::string amneziawgUnblockParams() const = 0;
+    virtual std::string amneziawgConfigId() const = 0;
 
     // this function is for debugging purposes, allows to set arbitrary resource update intervals
     virtual void setUpdateIntervals(int sessionInDisconnectedStateMs, int sessionInConnectedStateMs,
