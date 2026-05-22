@@ -1,3 +1,8 @@
+1.5.6.5 (21/05/2026)
+All:
+   * Force-disable custom TLS curves for ExtraPadding and CDN.
+
+
 1.5.6.4 (30/04/2026)
 All:
    * Added RapidJSON type safety checks across all JSON parsers to prevent assertion failures on unexpected value types. Hardens pingmethod_http, persistentsettings, serverlocations_request, echfailover, accessipsfailover, dynamicdomainfailover, and sessionstatus against malformed or tampered responses.
@@ -12,12 +17,12 @@ All:
 
 1.5.6.2 (20/04/2026)
 All:
-   * Replace the hostname with the IP-address for HTTP ping.https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1764
+   * Replace the hostname with the IP-address for HTTP ping.
 
 
 1.5.6.1 (17/04/2026)
 All:
-   * Fixed ALC purchased locations shown as disabled after app launch, https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1759.
+   * Fixed ALC purchased locations shown as disabled after app launch.
 
 
 1.5.6 (11/04/2026)
@@ -52,8 +57,8 @@ All:
 
 1.4.9 (09/03/2026)
 All:
-   * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo. #9
-   * Added support for the new server list v2 API (inventory-based). https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1594
+   * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo.
+   * Added support for the new server list v2 API (inventory-based).
 
 
 1.4.8 (24/02/2026)
