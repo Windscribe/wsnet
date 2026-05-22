@@ -102,6 +102,8 @@ std::vector<InventoryLocation> InventoryParser::parseLocations(const std::string
         loc.name        = locVal["name"].GetString();
         loc.countryCode = locVal["country_code"].GetString();
         loc.shortName   = locVal["short_name"].GetString();
+        if (locVal.HasMember("continent") && locVal["continent"].IsString())
+            loc.continent = locVal["continent"].GetString();
 
         for (const auto &dcVal : locVal["datacenters"].GetArray()) {
             if (!dcVal.IsObject()) continue;
@@ -157,8 +159,9 @@ std::vector<InventoryLocation> InventoryParser::parseLocations(const std::string
 
 bool InventoryParser::parseServers(const std::string &json,
                                    std::map<int, InventoryServer> &servers,
-                                   std::int64_t &revision)
+                                   std::int64_t &revision, std::string &amneziawgConfigId)
 {
+    amneziawgConfigId.clear();
     if (json.empty()) return false;
 
     using namespace rapidjson;
@@ -186,6 +189,10 @@ bool InventoryParser::parseServers(const std::string &json,
         return false;
     }
     revision = data["revision"].GetInt64();
+
+    if (data.HasMember("amneziawg_config_id") && data["amneziawg_config_id"].IsString()) {
+        amneziawgConfigId = data["amneziawg_config_id"].GetString();
+    }
 
     servers.clear();
     for (const auto &srvVal : data["servers"].GetArray()) {
@@ -315,6 +322,10 @@ ServerInventoryDelta InventoryParser::parseDelta(const std::string &sessionJson)
 
     delta.revision = inv["revision"].GetInt64();
 
+    if (inv.HasMember("amneziawg_config_id") && inv["amneziawg_config_id"].IsString()) {
+        delta.amneziawgConfigId = inv["amneziawg_config_id"].GetString();
+    }
+
     const std::string action = inv["action"].GetString();
 
     if (action == "hold") {
@@ -361,6 +372,7 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
         serverLoc.name        = loc.name;
         serverLoc.countryCode = loc.countryCode;
         serverLoc.shortName   = loc.shortName;
+        serverLoc.continent   = loc.continent;
         serverLoc.premiumOnly = loc.premiumOnly;
 
         for (const auto &dc : loc.datacenters) {
@@ -392,7 +404,7 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
                                              ^ (std::hash<int>{}(dc.id) << 1);
                 const auto &pingServer = *dcServers[pingSeed % dcServers.size()];
                 group.pingIp   = pingServer.ip;
-                group.pingHost = "http://" + pingServer.host + ":6464/latency";
+                group.pingHost = "http://" + pingServer.ip + ":6464/latency";
 
                 // Average net_load across all servers in this datacenter.
                 int totalNetLoad = 0;
@@ -438,6 +450,7 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
         jsonLoc.AddMember("name",         rapidjson::Value(loc.name.c_str(), alloc), alloc);
         jsonLoc.AddMember("country_code", rapidjson::Value(loc.countryCode.c_str(), alloc), alloc);
         jsonLoc.AddMember("short_name",   rapidjson::Value(loc.shortName.c_str(), alloc), alloc);
+        jsonLoc.AddMember("continent",    rapidjson::Value(loc.continent.c_str(), alloc), alloc);
         jsonLoc.AddMember("premium_only", loc.premiumOnly, alloc);
 
         int p2pLoc = 1;
@@ -467,7 +480,7 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
                                              ^ (std::hash<int>{}(dc.id) << 1);
                 const auto &pingServer = *dcServers[pingSeed % dcServers.size()];
                 pingIp   = pingServer.ip;
-                pingHost = "http://" + pingServer.host + ":6464/latency";
+                pingHost = "http://" + pingServer.ip + ":6464/latency";
 
                 // Average net_load across all servers in this datacenter.
                 int totalNetLoad = 0;

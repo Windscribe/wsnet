@@ -61,7 +61,7 @@ BaseRequest *serverapi_requests_factory::deleteSession(const std::string &authHa
 }
 
 BaseRequest *serverapi_requests_factory::serverLocations(PersistentSettings &persistentSettings, const std::string &language, const std::string &revision, bool isPro, const std::vector<std::string> &alcList,
-                                               ConnectState &connectState, WSNetAdvancedParameters *advancedParameters, RequestFinishedCallback callback)
+                                               std::shared_ptr<ConnectState> connectState, WSNetAdvancedParameters *advancedParameters, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     // generate alc parameter

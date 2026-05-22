@@ -103,6 +103,7 @@ public:
 
         failoverContainer_ = std::make_unique<FailoverContainer>(httpNetworkManager_.get());
         advancedParameters_ = std::make_shared<AdvancedParameters>();
+        connectState_ = std::make_shared<ConnectState>();
         bridgeAPI_ = std::make_shared<BridgeAPI>(io_context_, httpNetworkManager_.get(), *persistentSettings_, advancedParameters_.get(), connectState_);
         serverAPI_ = std::make_shared<ServerAPI>(io_context_, httpNetworkManager_.get(), failoverContainer_.get(), *persistentSettings_, advancedParameters_.get(), connectState_);
         apiResourcesManager_ = std::make_shared<ApiResourcesManager>(io_context_, serverAPI_.get(), *persistentSettings_, connectState_);
@@ -116,12 +117,12 @@ public:
 
     void setConnectivityState(bool isOnline) override
     {
-        connectState_.setConnectivityState(isOnline);
+        connectState_->setConnectivityState(isOnline);
     }
     void setIsConnectedToVpnState(bool isConnected) override
     {
-        if (connectState_.isVPNConnected() != isConnected) {
-            connectState_.setIsConnectedToVpnState(isConnected);
+        if (connectState_->isVPNConnected() != isConnected) {
+            connectState_->setIsConnectedToVpnState(isConnected);
             // When connecting/disconnecting the VPN clear the DNS cache.
             httpNetworkManager_->clearDnsCache();
         }
@@ -155,7 +156,7 @@ private:
     boost::asio::io_context io_context_;
     boost::asio::executor_work_guard<boost::asio::io_context::executor_type> work_;
 
-    ConnectState connectState_;
+    std::shared_ptr<ConnectState> connectState_;
     std::unique_ptr<PersistentSettings> persistentSettings_;
     std::shared_ptr<DnsResolver_cares> dnsResolver_;
     std::shared_ptr<HttpNetworkManager> httpNetworkManager_;

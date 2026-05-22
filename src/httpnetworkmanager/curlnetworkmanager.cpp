@@ -436,7 +436,13 @@ bool CurlNetworkManager::setupResolveHosts(RequestInfo *requestInfo, const std::
             hostname = request->hostname();
         }
 
-        std::string strResolve = hostname + ":" + std::to_string(port) + ":" + utils::join(ips, ",");
+        // IPv6 addresses must be wrapped in brackets in curl's CURLOPT_RESOLVE format
+        std::vector<std::string> resolveIps;
+        resolveIps.reserve(ips.size());
+        for (const auto &ip : ips) {
+            resolveIps.push_back(utils::wrapIpv6(ip));
+        }
+        std::string strResolve = hostname + ":" + std::to_string(port) + ":" + utils::join(resolveIps, ",");
         struct curl_slist *hosts = curl_slist_append(NULL, strResolve.c_str());
         if (hosts == NULL) return false;
         requestInfo->curlLists.push_back(hosts);

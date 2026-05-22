@@ -9,19 +9,19 @@
 
 namespace wsnet {
 
-BridgeAPI::BridgeAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, ConnectState &connectState) :
+BridgeAPI::BridgeAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState) :
     io_context_(io_context),
     persistentSettings_(persistentSettings),
     advancedParameters_(advancedParameters),
     connectState_(connectState)
 {
     impl_ = std::make_unique<BridgeAPI_impl>(httpNetworkManager, persistentSettings_, advancedParameters, connectState);
-    subscriberId_ = connectState_.subscribeConnectedToVpnState(std::bind(&BridgeAPI::onVPNConnectStateChanged, this, std::placeholders::_1));
+    subscriberId_ = connectState_->subscribeConnectedToVpnState(std::bind(&BridgeAPI::onVPNConnectStateChanged, this, std::placeholders::_1));
 }
 
 BridgeAPI::~BridgeAPI()
 {
-    connectState_.unsubscribeConnectedToVpnState(subscriberId_);
+    connectState_->unsubscribeConnectedToVpnState(subscriberId_);
     impl_.reset();
 }
 

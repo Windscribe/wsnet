@@ -24,7 +24,7 @@ class ServerAPI_impl
 {
 public:
     explicit ServerAPI_impl(WSNetHttpNetworkManager *httpNetworkManager, IFailoverContainer *failoverContainer,
-                            PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, ConnectState &connectState);
+                            PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState);
     virtual ~ServerAPI_impl();
 
     void setApiResolutionsSettings(const std::string &apiRoot, const std::string &assetsRoot);
@@ -38,7 +38,7 @@ public:
 private:
     WSNetHttpNetworkManager *httpNetworkManager_;
     WSNetAdvancedParameters *advancedParameters_;
-    ConnectState &connectState_;
+    std::shared_ptr<ConnectState> connectState_;
     IFailoverContainer *failoverContainer_;
     std::shared_ptr<CancelableCallback<WSNetTryingBackupEndpointCallback>> tryingBackupEndpointCallback_ = nullptr;
 

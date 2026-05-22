@@ -8,7 +8,12 @@ DnsServers::DnsServers(const std::vector<std::string> &ips)
 {
     servers_ = ips;
     for (auto &it : servers_) {
-        it += ":53";
+        // IPv6 addresses must be wrapped in brackets: [::1]:53
+        if (utils::isIpv6Address(it)) {
+            it = "[" + it + "]:53";
+        } else {
+            it += ":53";
+        }
     }
 }
 

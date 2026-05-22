@@ -48,6 +48,8 @@ project(wsnet
     LANGUAGES CXX
 )
 
+option(IS_BUILD_TESTS "Build the wsnet test suite (desktop only)" OFF)
+
 configure_file(cmake/wsnet_version.h.in ${PROJECT_BINARY_DIR}/wsnet_version.h)
 
 find_package(c-ares CONFIG REQUIRED)
@@ -93,7 +95,7 @@ add_library(wsnet::wsnet ALIAS wsnet)
 
 target_compile_features(wsnet PUBLIC cxx_std_17)
 
-if (DEFINED IS_BUILD_TESTS)
+if (IS_BUILD_TESTS)
     if (NOT WIN32)
         target_compile_options(wsnet PRIVATE -g -O0 --coverage -fprofile-arcs -ftest-coverage)
         target_link_options(wsnet PRIVATE --coverage)

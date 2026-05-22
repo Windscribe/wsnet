@@ -13,7 +13,7 @@ using namespace std::chrono;
 // ---------------------------------------------------------------------------
 
 ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WSNetServerAPI *serverAPI,
-                                         PersistentSettings &persistentSettings, ConnectState &connectState)
+                                         PersistentSettings &persistentSettings, std::shared_ptr<ConnectState> connectState)
     : io_context_(io_context),
       fetchTimer_(io_context, boost::asio::chrono::seconds(1)),
       serverAPI_(serverAPI),
@@ -21,6 +21,7 @@ ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WS
       connectState_(connectState)
 {
     sessionStatus_.reset(SessionStatus::createFromJson(persistentSettings_.sessionStatus()));
+    prevSessionStatus_.reset(SessionStatus::createFromJson(persistentSettings_.sessionStatus()));
 
     // Restore inventory v2 state from persistent settings.
     inventoryLocations_ = InventoryParser::parseLocations(persistentSettings_.invLocations());
@@ -266,6 +267,7 @@ std::string ApiResourcesManager::serverCredentialsIkev2() const { return persist
 std::string ApiResourcesManager::serverConfigs() const   { return persistentSettings_.serverConfigs(); }
 std::string ApiResourcesManager::notifications() const   { return persistentSettings_.notifications(); }
 std::string ApiResourcesManager::amneziawgUnblockParams() const { return persistentSettings_.amneziawgUnblockParams(); }
+std::string ApiResourcesManager::amneziawgConfigId() const { return persistentSettings_.amneziawgConfigId(); }
 
 std::shared_ptr<WSNetServerLocations> ApiResourcesManager::serverLocations() const
 {
@@ -317,6 +319,12 @@ bool ApiResourcesManager::rebuildServerLocations()
 bool ApiResourcesManager::applyInventoryDelta(const std::string &sessionJson)
 {
     ServerInventoryDelta delta = InventoryParser::parseDelta(sessionJson);
+
+    if (delta.amneziawgConfigId != persistentSettings_.amneziawgConfigId()) {
+        persistentSettings_.setAmneziawgConfigId(delta.amneziawgConfigId);
+        g_logger->info("ApiResourcesManager: amneziawg_config_id updated to {}", delta.amneziawgConfigId);
+        callback_->call(ApiResourcesManagerNotification::kAmneziawgConfigIdUpdated, LoginResult::kSuccess, std::string());
+    }
 
     if (delta.action == ServerInventoryDelta::Action::kNone)
         return false;
@@ -451,7 +459,7 @@ void ApiResourcesManager::checkForServerCredentialsFetchFinished()
 void ApiResourcesManager::fetchAll()
 {
     // Session — with current inv_rev for delta delivery.
-    if (connectState_.isVPNConnected()) {
+    if (connectState_->isVPNConnected()) {
         if (isTimeoutForRequest(RequestType::kSessionStatus, sessionInConnectedStateMs_) || forceRefetchSessionStatus_)
             if (fetchSession(persistentSettings_.authHash())) {
                 forceRefetchSessionStatus_ = false;
@@ -697,6 +705,7 @@ void ApiResourcesManager::updateSessionStatus()
         }
     } else {
         g_logger->info("update session status (changed since last call)");
+        fetchInventoryServers();
         sessionStatus_->debugLog();
     }
 
@@ -888,8 +897,16 @@ void ApiResourcesManager::onInventoryServersAnswer(ServerApiRetCode serverApiRet
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         std::map<int, InventoryServer> newServers;
         std::int64_t newRevision = 0;
+        std::string amneziawgConfigId;
 
-        if (InventoryParser::parseServers(jsonData, newServers, newRevision)) {
+        if (InventoryParser::parseServers(jsonData, newServers, newRevision, amneziawgConfigId)) {
+
+            if (amneziawgConfigId != persistentSettings_.amneziawgConfigId()) {
+                persistentSettings_.setAmneziawgConfigId(amneziawgConfigId);
+                g_logger->info("ApiResourcesManager: amneziawg_config_id updated to {}", amneziawgConfigId);
+                callback_->call(ApiResourcesManagerNotification::kAmneziawgConfigIdUpdated, LoginResult::kSuccess, std::string());
+            }
+
             bool serversChanged = (newServers != inventoryServers_);
 
             // Always persist the new revision — it may advance even without server changes.
@@ -1080,6 +1097,8 @@ void ApiResourcesManager::clearValues()
     persistentSettings_.setStaticIps(std::string());
     persistentSettings_.setNotifications(std::string());
     persistentSettings_.setAmneziawgUnblockParams(std::string());
+    persistentSettings_.setAmneziawgConfigId(std::string());
+    persistentSettings_.setSessionTokens({});
 }
 
 } // namespace wsnet

@@ -31,7 +31,7 @@ DnsCacheResult DnsCache::resolve(std::uint64_t id, const std::string &hostname, 
             return DnsCacheResult { id, true, it->second, 0, RequestError::createCaresSuccess() };
         }
     }
-    auto asyncRequest = dnsResolver_->lookup(hostname, id, std::bind(&DnsCache::onDnsResolved, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    auto asyncRequest = dnsResolver_->lookup(hostname, id, IpFamily::kIpv4, std::bind(&DnsCache::onDnsResolved, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
     activeRequests_[id] = asyncRequest;
     return DnsCacheResult { id, false, std::vector<std::string>(), 0, RequestError::createCaresSuccess() };
 }

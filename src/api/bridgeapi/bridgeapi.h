@@ -14,7 +14,7 @@ class BridgeAPI_impl;
 class BridgeAPI : public WSNetBridgeAPI
 {
 public:
-    explicit BridgeAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, ConnectState &connectState);
+    explicit BridgeAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState);
     virtual ~BridgeAPI();
 
     void setConnectedState(bool isConnected) override;
@@ -31,7 +31,7 @@ private:
     boost::asio::io_context &io_context_;
     PersistentSettings &persistentSettings_;
     WSNetAdvancedParameters *advancedParameters_;
-    ConnectState &connectState_;
+    std::shared_ptr<ConnectState> connectState_;
     std::uint32_t subscriberId_;
 
     void onVPNConnectStateChanged(bool isConnected);

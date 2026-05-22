@@ -1,6 +1,6 @@
-#define CARES_NO_DEPRECATED     // Someday remove this and replace the functions with the new c-ares interface
 #include <ares.h>
 #include "dnsresolver_cares.h"
+#include <algorithm>
 #include <assert.h>
 #include <fmt/ranges.h>
 #include "utils/wsnet_logger.h"
@@ -14,6 +14,7 @@
     #include <poll.h>
 #elif defined(_WIN32) || defined(_WIN64)
     #include <winsock2.h>
+    #include <ws2tcpip.h>
     #define poll WSAPoll
 #endif
 
@@ -53,7 +54,7 @@ void DnsResolver_cares::setDnsServers(const std::vector<std::string> &dnsServers
     dnsServers_ = DnsServers(dnsServers);
 }
 
-std::shared_ptr<WSNetCancelableCallback> DnsResolver_cares::lookup(const std::string &hostname, std::uint64_t userDataId, WSNetDnsResolverCallback callback)
+std::shared_ptr<WSNetCancelableCallback> DnsResolver_cares::lookup(const std::string &hostname, std::uint64_t userDataId, IpFamily ipFamily, WSNetDnsResolverCallback callback)
 {
     std::lock_guard locker(mutex_);
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetDnsResolverCallback>>(callback);
@@ -62,6 +63,7 @@ std::shared_ptr<WSNetCancelableCallback> DnsResolver_cares::lookup(const std::st
     qi.hostname = hostname;
     qi.callback = cancelableCallback;
     qi.userDataId = userDataId;
+    qi.ipFamily = ipFamily;
     qi.requestId = curRequestId_++;
 
     activeRequests_.insert(qi.requestId);
@@ -71,14 +73,14 @@ std::shared_ptr<WSNetCancelableCallback> DnsResolver_cares::lookup(const std::st
     return cancelableCallback;
 }
 
-std::shared_ptr<WSNetDnsRequestResult> DnsResolver_cares::lookupBlocked(const std::string &hostname)
+std::shared_ptr<WSNetDnsRequestResult> DnsResolver_cares::lookupBlocked(const std::string &hostname, IpFamily ipFamily)
 {
     // helper class for wait an async request
     class BlockedRequest {
         public:
-            BlockedRequest(WSNetDnsResolver *dnsResolver, const std::string &hostname)
+            BlockedRequest(WSNetDnsResolver *dnsResolver, const std::string &hostname, IpFamily ipFamily)
             {
-                dnsResolver->lookup(hostname, 0, std::bind(&BlockedRequest::callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+                dnsResolver->lookup(hostname, 0, ipFamily, std::bind(&BlockedRequest::callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
             }
 
             std::shared_ptr<WSNetDnsRequestResult> waitForFinished()
@@ -101,7 +103,7 @@ std::shared_ptr<WSNetDnsRequestResult> DnsResolver_cares::lookupBlocked(const st
             std::shared_ptr<WSNetDnsRequestResult> result_;
     };
 
-    BlockedRequest blockedRequest(this, hostname);
+    BlockedRequest blockedRequest(this, hostname, ipFamily);
     return blockedRequest.waitForFinished();
 }
 
@@ -179,12 +181,18 @@ void DnsResolver_cares::run()
         // start new requests from the queue
         while (!localQueue.empty()) {
             QueueItem qi = localQueue.front();
-            ArgToCaresCallback *arg = new ArgToCaresCallback();     // will be deleted in caresCallback
+            ArgToCaresCallback *arg = new ArgToCaresCallback();     // will be deleted in caresAddrInfoCallback
             arg->this_ = this;
             arg->qi = qi;
             arg->qi.startTime = std::chrono::steady_clock::now();
 
-            ares_gethostbyname(channel, arg->qi.hostname.c_str(), AF_INET, caresCallback, arg);
+            struct ares_addrinfo_hints hints = {};
+            switch (arg->qi.ipFamily) {
+                case IpFamily::kIpv4: hints.ai_family = AF_INET;   break;
+                case IpFamily::kIpv6: hints.ai_family = AF_INET6;  break;
+                case IpFamily::kBoth: hints.ai_family = AF_UNSPEC; break;
+            }
+            ares_getaddrinfo(channel, arg->qi.hostname.c_str(), nullptr, &hints, caresAddrInfoCallback, arg);
             localQueue.pop();
         }
 
@@ -245,7 +253,7 @@ void DnsResolver_cares::run()
     ares_destroy(channel);
 }
 
-void DnsResolver_cares::caresCallback(void *arg, int status, int timeouts, hostent *host)
+void DnsResolver_cares::caresAddrInfoCallback(void *arg, int status, int timeouts, struct ares_addrinfo *addrinfo)
 {
     ArgToCaresCallback *pars = (ArgToCaresCallback *)arg;
 
@@ -260,12 +268,19 @@ void DnsResolver_cares::caresCallback(void *arg, int status, int timeouts, hoste
     }
 
     std::shared_ptr<DnsRequestResult> result = std::make_shared<DnsRequestResult>();
-    if (status == ARES_SUCCESS) {
-        for (char **p = host->h_addr_list; *p; p++) {
-            char addr_buf[46] = "??";
-            ares_inet_ntop(host->h_addrtype, *p, addr_buf, sizeof(addr_buf));
+    if (status == ARES_SUCCESS && addrinfo != nullptr) {
+        for (struct ares_addrinfo_node *node = addrinfo->nodes; node != nullptr; node = node->ai_next) {
+            char addr_buf[INET6_ADDRSTRLEN] = {};
+            if (node->ai_family == AF_INET) {
+                auto *addr4 = reinterpret_cast<struct sockaddr_in *>(node->ai_addr);
+                ares_inet_ntop(AF_INET, &addr4->sin_addr, addr_buf, sizeof(addr_buf));
+            } else if (node->ai_family == AF_INET6) {
+                auto *addr6 = reinterpret_cast<struct sockaddr_in6 *>(node->ai_addr);
+                ares_inet_ntop(AF_INET6, &addr6->sin6_addr, addr_buf, sizeof(addr_buf));
+            }
             result->ips_.push_back(addr_buf);
         }
+        ares_freeaddrinfo(addrinfo);
     }
 
     result->elapsedMs_ = (unsigned int)utils::since(pars->qi.startTime).count();
@@ -273,7 +288,6 @@ void DnsResolver_cares::caresCallback(void *arg, int status, int timeouts, hoste
 
     // if the channel was destroyed, then do not call a callback function
     if (status != ARES_EDESTRUCTION) {
-        // do callback
         pars->qi.callback->call(pars->qi.userDataId, pars->qi.hostname, result);
     }
     delete pars;

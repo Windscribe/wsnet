@@ -1,3 +1,50 @@
+1.5.15 (19/05/2026)
+All:
+   * Added ipv6 support.
+   * Removed test/coverage flags from build.
+
+
+1.5.14 (30/04/2026)
+All:
+   * Added RapidJSON type safety checks across all JSON parsers to prevent assertion failures on unexpected value types. Hardens pingmethod_http, persistentsettings, serverlocations_request, echfailover, accessipsfailover, dynamicdomainfailover, and sessionstatus against malformed or tampered responses.
+   * Added amneziawg_config_id tracking from the server inventory API.
+
+
+1.5.13 (24/04/2026)
+All:
+   * Fixed IS_BUILD_TESTS CMake flag not being honored; tests were always built regardless of the flag's value. Tests now build only when IS_BUILD_TESTS is truthy.
+
+
+1.5.12 (22/04/2026)
+All:
+   * Fixed Bridge API session tokens not being cleared during logout and persistent settings cleanup.
+   * Fixed use-after-free crash when API handles outlive global WSNet teardown.
+
+
+1.5.11 (20/04/2026)
+All:
+  * Replace the hostname with the IP-address for HTTP ping.
+iOS:
+  * Generate dsyms alongside frameworks so we can have sybolication in crash reports.
+
+
+1.5.10 (17/04/2026)
+All:
+   * Fixed ALC purchased locations shown as disabled after app launch.
+
+
+1.5.9 (16/04/2026)
+All:
+   * Added continent field to ServerLocation and InventoryLocation, parsed from the /Inventory/locations API response.
+
+
+1.5.8 (15/04/2026)
+All:
+   * Fixed missing `errno.h` include on non-Windows platforms in requesterror.cpp, required for POSIX error constants (EHOSTUNREACH, ENETUNREACH, ENETDOWN).
+   * Fixed macOS linking by adding the SystemConfiguration framework dependency, required for SCDynamicStore DNS config functions.
+   * Updated OpenSSL to 4.0.0. ECH is now supported natively upstream, removing the need for our custom ECH patch.
+
+
 1.5.7 (13/04/2026)
 All:
    * Updated OpenSSL to 3.6.2.
@@ -35,8 +82,8 @@ All:
 
 1.4.9 (09/03/2026)
 All:
-   * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo. #9
-   * Added support for the new server list v2 API (inventory-based). https://gitlab.int.windscribe.com/ws/client/desktop/client-desktop/-/issues/1594
+   * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo.
+   * Added support for the new server list v2 API (inventory-based).
 
 
 1.4.8 (24/02/2026)

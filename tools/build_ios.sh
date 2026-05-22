@@ -40,19 +40,36 @@ for i in ${!ARCHITECTURES[@]}; do
     -DDEPLOYMENT_TARGET=$deploymentTarget \
     -DSCAPIX_BRIDGE=objc \
     -DCMAKE_BUILD_TYPE=Release
-  cmake --build "temp/build/$arch" -j $NumberOfCores --config Release
+  cmake --build "temp/build/$arch" -j $NumberOfCores --config Release -- \
+    GCC_GENERATE_DEBUGGING_SYMBOLS=YES \
+    DEBUG_INFORMATION_FORMAT=dwarf-with-dsym
   cmake --install "temp/build/$arch" --prefix "bin/ios/$arch"
    # Add missing keys to Info.plist.
      updateInfoPlist "bin/ios/$arch/wsnet.framework/Info.plist"
+
+  # Collect dSYM for crash symbolication
+  dsym=$(find "temp/build/$arch" -name "wsnet.framework.dSYM" -type d | head -1)
+  if [ -n "$dsym" ]; then
+    mkdir -p "bin/ios/$arch/dSYMs"
+    cp -R "$dsym" "bin/ios/$arch/dSYMs/"
+  else
+    echo "WARNING: No dSYM found for $arch — crash symbolication will not work for this slice"
+  fi
 done
 
-# Build combined framework
+# Build xcframework with embedded dSYMs
+XCFRAMEWORK_ARGS=()
+for arch in "${ARCHITECTURES[@]}"; do
+  XCFRAMEWORK_ARGS+=(-framework "./bin/ios/$arch/wsnet.framework")
+  dsym_path="./bin/ios/$arch/dSYMs/wsnet.framework.dSYM"
+  if [ -d "$dsym_path" ]; then
+    XCFRAMEWORK_ARGS+=(-debug-symbols "$(pwd)/bin/ios/$arch/dSYMs/wsnet.framework.dSYM")
+  fi
+done
+
 xcodebuild -create-xcframework \
-   -framework ./bin/ios/OS64/wsnet.framework \
-   -framework ./bin/ios/SIMULATORARM64/wsnet.framework \
-   -framework ./bin/ios/TVOS/wsnet.framework \
-   -framework ./bin/ios/SIMULATORARM64_TVOS/wsnet.framework \
-   -output ./build/WSNet.xcframework
+  "${XCFRAMEWORK_ARGS[@]}" \
+  -output ./build/WSNet.xcframework
 
 rm -rf ./bin
 rm -rf temp

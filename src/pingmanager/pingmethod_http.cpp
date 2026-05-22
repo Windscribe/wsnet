@@ -72,7 +72,7 @@ int PingMethodHttp::parseReplyString(const std::string &data)
         return -1;
     }
     auto jsonObject = doc.GetObject();
-    if (jsonObject.HasMember("rtt")) {
+    if (jsonObject.HasMember("rtt") && jsonObject["rtt"].IsString()) {
         std::string value = jsonObject["rtt"].GetString();
         if (!value.empty()) {
             try {

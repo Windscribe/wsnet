@@ -52,8 +52,19 @@ inline std::vector<std::string> split(const std::string &str, char character)
 
 }
 
-// check if ip is valid ip address string
+// check if ip is valid IPv4 address string
 bool isIpAddress(const std::string &ip);
+
+// check if ip is valid IPv6 address string
+bool isIpv6Address(const std::string &ip);
+
+// wrap an IPv6 address in square brackets if not already wrapped
+inline std::string wrapIpv6(const std::string &ip)
+{
+    if (isIpv6Address(ip))
+        return "[" + ip + "]";
+    return ip;
+}
 
 // return first n characters of string
 inline std::string leftSubStr(const std::string &s, int n)

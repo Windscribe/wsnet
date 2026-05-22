@@ -1,3 +1,14 @@
+include:
+  - project: 'shared/strix-ci-template'
+    file: 'strix-scan.yml'
+
+strix-scan-quick:
+  stage: Test
+strix-scan-standard:
+  stage: Test
+strix-scan-mr-diff:
+  stage: Test
+
 stages:
   - Build
   - Test
@@ -57,10 +68,8 @@ build:wsnet:win:
       -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-x64-windows-static-release
       -DVCPKG_HOST_TRIPLET=ws-x64-windows-static-release
-      -DIS_BUILD_TESTS=ON
     - cmake --build build --config Release --parallel
   rules:
-    - if: $BUILD_WIN == "y" && $NIGHTLY_TEST_BUILD == "y"
     - if: $BUILD_WIN == "y" && $CI_PIPELINE_SOURCE == "push"
   artifacts:
     expire_in: 1 day
@@ -76,9 +85,6 @@ build:wsnet:mac:
     - cmake -B build -S .
       -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-universal-osx
-      -DIS_BUILD_TESTS=ON
-      -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
-      -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
       "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations,-clang-analyzer-osx.cocoa.RetainCount,-clang-analyzer-nullability.NullablePassedToNonnull;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
     - cmake --build build --parallel
   artifacts:
@@ -86,7 +92,6 @@ build:wsnet:mac:
     paths:
       - build/
   rules:
-    - if: $BUILD_MAC == "y" && $NIGHTLY_TEST_BUILD == "y"
     - if: $BUILD_MAC == "y" && $CI_PIPELINE_SOURCE == "push"
 
 build:wsnet:rhel:
@@ -99,9 +104,6 @@ build:wsnet:rhel:
     - cmake -B build -S .
       -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-x64-linux
-      -DIS_BUILD_TESTS=ON
-      -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
-      -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
       "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
     - cmake --build build --parallel
 
@@ -110,33 +112,36 @@ build:wsnet:rhel:
     paths:
       - build/
   rules:
-    - if: $BUILD_LINUX == "y" && $NIGHTLY_TEST_BUILD == "y"
-    - if: $BUILD_LINUX == "y" &&$CI_PIPELINE_SOURCE == "push"
+    - if: $BUILD_LINUX == "y" && $CI_PIPELINE_SOURCE == "push"
 
 test:wsnet:win:
   <<: *template_win10_build
   stage: Test
+  needs: []
   variables:
     GIT_STRATEGY: clone
   script:
+    - cmake -B build -S .
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      -DVCPKG_TARGET_TRIPLET=ws-x64-windows-static-release
+      -DVCPKG_HOST_TRIPLET=ws-x64-windows-static-release
+      -DIS_BUILD_TESTS=ON
+    - cmake --build build --config Release --parallel
     - pip3 install pproxy
-    - Start-Process -NoNewWindow -PassThru pproxy
     - |
-      $testExitCode = 0
-      try {
-        & build/test/Release/wsnet_test.exe --gtest_output=xml:report_win.xml
-        $testExitCode = $LASTEXITCODE
-      } finally {
+      $ok = $false
+      for ($i = 1; $i -le 3; $i++) {
+        Write-Host "=== Test attempt $i ==="
         Get-Process "pproxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        $pp = Start-Process -NoNewWindow -PassThru pproxy -ArgumentList "-l","http://127.0.0.1:8080"
+        & build/test/Release/wsnet_test.exe --gtest_output=xml:report_win.xml
+        $code = $LASTEXITCODE
+        Stop-Process -Id $pp.Id -Force -ErrorAction SilentlyContinue
+        if ($code -eq 0) { $ok = $true; break }
       }
-      if ($testExitCode -ne 0) { exit $testExitCode }
+      if (-not $ok) { exit 1 }
   after_script:
     - Get-Process "pproxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; $true
-  retry: 2
-  needs:
-    - job: build:wsnet:win
-      optional: true
-      artifacts: true
   rules:
     - if: $BUILD_WIN == "y" && $NIGHTLY_TEST_BUILD == "y"
   artifacts:
@@ -150,24 +155,37 @@ test:wsnet:win:
 test:wsnet:mac:
   <<: *template_mac_build
   stage: Test
+  needs: []
   script:
+    - cmake -B build -S .
+      -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      -DVCPKG_TARGET_TRIPLET=ws-universal-osx
+      -DIS_BUILD_TESTS=ON
+      -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations,-clang-analyzer-osx.cocoa.RetainCount,-clang-analyzer-nullability.NullablePassedToNonnull;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
+    - cmake --build build --parallel
     - /usr/bin/python3 -m pip install pproxy
     - pip3 install gcovr
-    - install_name_tool -add_rpath "${CI_PROJECT_DIR}/build" build/test/wsnet_test || true
     - set +o pipefail
-    - if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
-    - /usr/bin/python3 -m pproxy &
-    - build/test/wsnet_test --gtest_output=xml:report_macos.xml || FAILED=1
-    - kill %1
-    - if [ $FAILED ]; then exit 1; fi
+    - |
+      FAILED=1
+      for attempt in 1 2 3; do
+        echo "=== Test attempt $attempt ==="
+        if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
+        /usr/bin/python3 -m pproxy -l http://127.0.0.1:8080 &
+        PPROXY_PID=$!
+        if build/test/wsnet_test --gtest_output=xml:report_macos.xml; then
+          kill $PPROXY_PID 2>/dev/null || true
+          FAILED=0
+          break
+        fi
+        kill $PPROXY_PID 2>/dev/null || true
+      done
+      [ $FAILED -eq 0 ]
   coverage: /^\s*lines:\s*\d+.\d+\%/
   after_script:
     - python3 -m gcovr --xml-pretty --exclude-unreachable-branches --print-summary --gcov-ignore-parse-errors=negative_hits.warn -o coverage.xml --root ${CI_PROJECT_DIR} --filter src/ --exclude src/private/tests/
-  retry: 2
-  needs:
-    - job: build:wsnet:mac
-      optional: true
-      artifacts: true
   rules:
     - if: $BUILD_MAC == "y" && $NIGHTLY_TEST_BUILD == "y"
   artifacts:
@@ -185,23 +203,38 @@ test:wsnet:mac:
 test:wsnet:rhel:
   <<: *template_rhel_build
   stage: Test
+  needs: []
   script:
+    - python3 -m pip install clang-tidy
+    - cmake -B build -S .
+      -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      -DVCPKG_TARGET_TRIPLET=ws-x64-linux
+      -DIS_BUILD_TESTS=ON
+      -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+      "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
+    - cmake --build build --parallel
     - pip3 install pproxy gcovr
     - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/build:${LD_LIBRARY_PATH}"
     - set +o pipefail
-    - if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
-    - python3 -m pproxy &
-    - build/test/wsnet_test --gtest_output=xml:report_linux.xml || FAILED=1
-    - kill %1
-    - if [ $FAILED ]; then exit 1; fi
+    - |
+      FAILED=1
+      for attempt in 1 2 3; do
+        echo "=== Test attempt $attempt ==="
+        if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
+        python3 -m pproxy -l http://127.0.0.1:8080 &
+        PPROXY_PID=$!
+        if build/test/wsnet_test --gtest_output=xml:report_linux.xml; then
+          kill $PPROXY_PID 2>/dev/null || true
+          FAILED=0
+          break
+        fi
+        kill $PPROXY_PID 2>/dev/null || true
+      done
+      [ $FAILED -eq 0 ]
   coverage: /^\s*lines:\s*\d+.\d+\%/
   after_script:
     - python3 -m gcovr --xml-pretty --exclude-unreachable-branches --print-summary --gcov-ignore-parse-errors=negative_hits.warn -o coverage.xml --root ${CI_PROJECT_DIR} --filter src/ --exclude src/private/tests/
-  retry: 2
-  needs:
-    - job: build:wsnet:rhel
-      optional: true
-      artifacts: true
   rules:
     - if: $BUILD_LINUX == "y" && $NIGHTLY_TEST_BUILD == "y"
   artifacts:
@@ -254,7 +287,7 @@ build:wsnet:android:
     - $ANDROID_NDK_HOME/ndk-build --version || true
     # Build .aar
     - cd ./tools
-    - ./build_android.sh &> /dev/null
+    - set -o pipefail && ./build_android.sh 2>&1 | tail -200
     - zip -r WSNet.aar.zip wsnet.aar
   artifacts:
     name: "WSNet_Android_${CI_COMMIT_SHORT_SHA}"

@@ -49,6 +49,7 @@ struct ServerLocation
     std::string name;
     std::string countryCode;
     std::string shortName;
+    std::string continent;
     bool premiumOnly = false;
     std::string dnsHostName;
     std::vector<ServerGroup> groups;

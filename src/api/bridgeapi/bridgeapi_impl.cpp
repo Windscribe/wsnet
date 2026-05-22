@@ -10,7 +10,7 @@
 
 namespace wsnet {
 
-BridgeAPI_impl::BridgeAPI_impl(WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, ConnectState &connectState) :
+BridgeAPI_impl::BridgeAPI_impl(WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState) :
     httpNetworkManager_(httpNetworkManager),
     advancedParameters_(advancedParameters),
     connectState_(connectState),
@@ -98,7 +98,7 @@ void BridgeAPI_impl::executeRequest(std::unique_ptr<BaseRequest> request)
     }
 
     // check if we are online
-    if (!connectState_.isOnline() || !isConnected_) {
+    if (!connectState_->isOnline() || !isConnected_) {
         request->setRetCode(ApiRetCode::kNoNetworkConnection);
         request->callCallback();
         return;

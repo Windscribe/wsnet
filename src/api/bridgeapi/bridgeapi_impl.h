@@ -20,7 +20,7 @@ namespace wsnet {
 class BridgeAPI_impl
 {
 public:
-    explicit BridgeAPI_impl(WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, ConnectState &connectState);
+    explicit BridgeAPI_impl(WSNetHttpNetworkManager *httpNetworkManager, PersistentSettings &persistentSettings, WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState);
     virtual ~BridgeAPI_impl();
 
     void setConnectedState(bool isConnected);
@@ -37,7 +37,7 @@ public:
 private:
     WSNetHttpNetworkManager *httpNetworkManager_;
     WSNetAdvancedParameters *advancedParameters_;
-    ConnectState &connectState_;
+    std::shared_ptr<ConnectState> connectState_;
 
     std::uint64_t curUniqueId_ = 0;     // for generate unique identifiers for HTTP-requests
 

@@ -66,7 +66,7 @@ std::shared_ptr<WSNetCancelableCallback> EmergencyConnect::getIpEndpoints(WSNetE
         std::string hashedDomain = "econnect." + data[0].domain();
 
         using namespace std::placeholders;
-        auto dnsRequest = dnsResolver_->lookup(hashedDomain, curRequestId_, std::bind(&EmergencyConnect::onDnsResolved, this, _1, _2, _3));
+        auto dnsRequest = dnsResolver_->lookup(hashedDomain, curRequestId_, IpFamily::kIpv4, std::bind(&EmergencyConnect::onDnsResolved, this, _1, _2, _3));
         dnsRequests_[curRequestId_] = std::make_pair(dnsRequest, cancelableCallback);
         curRequestId_++;
     });

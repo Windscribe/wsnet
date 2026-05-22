@@ -9,7 +9,7 @@
       {
         "kind": "git",
         "repository": "https://github.com/Windscribe/ws-vcpkg-registry",
-        "baseline": "29845fc0d3994c2b675b6c454b040ae1e1228d27",
+        "baseline": "526b5a85f31d425b9f38087453b372c0b19ff086",
         "packages": [
           "7zip",
           "boost-context",

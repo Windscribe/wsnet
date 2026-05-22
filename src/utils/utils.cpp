@@ -38,11 +38,19 @@ int random(const int &min, const int &max)
     return 0;
 }
 
-// check if ip is valid ip address string
+// check if ip is valid IPv4 address string
 bool isIpAddress(const std::string &ip)
 {
     struct sockaddr_in sa;
     int result = inet_pton(AF_INET, ip.c_str(), &(sa.sin_addr));
+    return result > 0;
+}
+
+// check if ip is valid IPv6 address string
+bool isIpv6Address(const std::string &ip)
+{
+    struct sockaddr_in6 sa6;
+    int result = inet_pton(AF_INET6, ip.c_str(), &(sa6.sin6_addr));
     return result > 0;
 }
 

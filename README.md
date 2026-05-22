@@ -102,7 +102,7 @@ int main()
 
     wsnet->dnsResolver()->setDnsServers({ "1.1.1.1", "1.0.0.1"});
     // Blocking DNS resolution, waiting until complete
-    auto res = wsnet->dnsResolver()->lookupBlocked("google.com");
+    auto res = wsnet->dnsResolver()->lookupBlocked("google.com", IpFamily::kBoth);
     // work with res
     ...
 
@@ -111,7 +111,7 @@ int main()
     {
 
     };
-    auto request = wsnet->dnsResolver()->lookup("google.com", 0, callback);
+    auto request = wsnet->dnsResolver()->lookup("google.com", 0, IpFamily::kBoth, callback);
 
     // To cancel a request early, you can call: request->cancel()
 ```

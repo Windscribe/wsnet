@@ -6,7 +6,7 @@
 namespace wsnet {
 
 ServerAPI_impl::ServerAPI_impl(WSNetHttpNetworkManager *httpNetworkManager, IFailoverContainer *failoverContainer, PersistentSettings &persistentSettings,
-                               WSNetAdvancedParameters *advancedParameters, ConnectState &connectState) :
+                               WSNetAdvancedParameters *advancedParameters, std::shared_ptr<ConnectState> connectState) :
     httpNetworkManager_(httpNetworkManager),
     advancedParameters_(advancedParameters),
     connectState_(connectState),
@@ -85,7 +85,7 @@ void ServerAPI_impl::executeRequest(std::unique_ptr<BaseRequest> request)
     request->setApiOverrideSettings(apiOverrideSettings_);
 
     // check if we are online
-    if (!connectState_.isOnline()) {
+    if (!connectState_->isOnline()) {
         request->setRetCode(ServerApiRetCode::kNoNetworkConnection);
         request->callCallback();
         executeWaitingInQueueRequests();
