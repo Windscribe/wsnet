@@ -1,3 +1,13 @@
+1.5.17 (22/05/2026)
+All:
+   * Removed custom TLS curves list. OpenSSL 4.0 proposes post-quantum groups by default, and a custom list is a fingerprintable signature.
+
+
+1.5.16 (21/05/2026)
+All:
+   * Force-disable custom TLS curves for ExtraPadding and CDN.
+
+
 1.5.15 (19/05/2026)
 All:
    * Added ipv6 support.

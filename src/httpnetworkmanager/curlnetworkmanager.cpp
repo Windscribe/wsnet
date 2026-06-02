@@ -403,8 +403,6 @@ bool CurlNetworkManager::setupOptions(RequestInfo *requestInfo, const std::share
 
     curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_PRIVATE, new std::uint64_t(requestInfo->id));    // our user data, must be deleted in the RequestInfo destructor
 
-    curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_EC_CURVES, "X25519MLKEM768:MLKEM1024:MLKEM768:SecP384r1MLKEM1024:SecP256r1MLKEM768:X448:X25519:secp521r1:secp384r1:secp256r1:ffdhe8192:ffdhe6144:ffdhe4096:ffdhe3072:ffdhe2048");
-
     // set post data
     std::string postData = request->postData();
     if (!postData.empty()) {
