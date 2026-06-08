@@ -61,14 +61,10 @@ void BridgeAPI::setCurrentHost(const std::string &host)
 std::shared_ptr<WSNetCancelableCallback> BridgeAPI::pinIp(const std::string &ip, WSNetRequestFinishedCallback callback)
 {
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    // Use the bridge token from impl
     BaseRequest *request = bridgeapi_requests_factory::pinIp("", ip, cancelableCallback);
     // This request does not return any data
     request->setIgnoreJsonParse();
-    auto token = impl_->sessionToken();
-    if (token) {
-        static_cast<BridgeAPIRequest *>(request)->setSessionToken(token->first);
-    }
+    // Session token is applied on the BridgeAPI io_context thread.
     boost::asio::post(io_context_, [this, request] { impl_->pinIp(std::unique_ptr<BaseRequest>(request)); });
     return cancelableCallback;
 }
@@ -76,14 +72,10 @@ std::shared_ptr<WSNetCancelableCallback> BridgeAPI::pinIp(const std::string &ip,
 std::shared_ptr<WSNetCancelableCallback> BridgeAPI::rotateIp(WSNetRequestFinishedCallback callback)
 {
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    // Use the bridge token from impl
     BaseRequest *request = bridgeapi_requests_factory::rotateIp("", cancelableCallback);
     // This request does not return any data
     request->setIgnoreJsonParse();
-    auto token = impl_->sessionToken();
-    if (token) {
-        static_cast<BridgeAPIRequest *>(request)->setSessionToken(token->first);
-    }
+    // Session token is applied on the BridgeAPI io_context thread.
     boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
     return cancelableCallback;
 }

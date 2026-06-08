@@ -57,7 +57,7 @@ PersistentSettings::PersistentSettings(const std::string &settings)
             notifications_ = jsonObject["notifications"].GetString();
         if (jsonObject.HasMember("amneziawgUnblockParams") && jsonObject["amneziawgUnblockParams"].IsString())
             amneziawgUnblockParams_ = jsonObject["amneziawgUnblockParams"].GetString();
-        if (jsonObject.HasMember("amneziawgConfigId"))
+        if (jsonObject.HasMember("amneziawgConfigId") && jsonObject["amneziawgConfigId"].IsString())
             amneziawgConfigId_ = jsonObject["amneziawgConfigId"].GetString();
         if (jsonObject.HasMember("sessionToken")) {
             if (jsonObject["sessionToken"].IsObject()) {

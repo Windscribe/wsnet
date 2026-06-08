@@ -30,7 +30,8 @@ namespace serverapi_requests_factory
                         const std::string &referringUsername, const std::string &email,
                         const std::string &sessionTypeId, const std::string &voucherCode,
                         const std::string &secureToken, const std::string &captchaSolution,
-                        const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY,RequestFinishedCallback callback);
+                        const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY,
+                        const std::string &attestationToken, RequestFinishedCallback callback);
 
 
     BaseRequest *webSession(const std::string &authHash, RequestFinishedCallback callback);
@@ -78,7 +79,7 @@ namespace serverapi_requests_factory
                                                                RequestFinishedCallback callback);
 
     BaseRequest *regToken(RequestFinishedCallback callback);
-    BaseRequest *signupUsingToken(const std::string &token, RequestFinishedCallback callback);
+    BaseRequest *signupUsingToken(const std::string &token, const std::string &attestationToken, RequestFinishedCallback callback);
     BaseRequest *claimAccount(const std::string &authHash, const std::string &username, const std::string &password,
                               const std::string &email, const std::string &voucherCode, const std::string &claimAccount, RequestFinishedCallback callback);
 
@@ -89,7 +90,7 @@ namespace serverapi_requests_factory
 
     BaseRequest *verifyTvLoginCode(const std::string &authHash, const std::string &xpressCode, RequestFinishedCallback callback);
     BaseRequest *cancelAccount(const std::string &authHash, const std::string &password, RequestFinishedCallback callback);
-    BaseRequest *sso(const std::string &provider, const std::string &token, RequestFinishedCallback callback);
+    BaseRequest *sso(const std::string &provider, const std::string &token, const std::string &attestationToken, RequestFinishedCallback callback);
     BaseRequest *authTokenLogin(const std::string &username, bool useAsciiCaptcha, RequestFinishedCallback callback);
     BaseRequest *authTokenSignup(const std::string &username, bool useAsciiCaptcha, RequestFinishedCallback callback);
     BaseRequest *passwordRecovery(const std::string &email, RequestFinishedCallback callback);

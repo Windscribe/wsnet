@@ -1,3 +1,18 @@
+1.5.20 (08/06/2026)
+All:
+   * Fixed malformed persistent settings handling for non-string AmneziaWG config IDs and synchronized BridgeAPI session-token state.
+
+
+1.5.19 (05/06/2026)
+All:
+   * Use curve set, signature algorithms, and ec_point_formats exactly as Ubuntu 26.04 / Debian 13 / AltLinux Sisyphus.
+
+
+1.5.18 (26/05/2026)
+All:
+   * Added signup attestation token plumbing for signup, token signup, and SSO requests.
+
+
 1.5.17 (22/05/2026)
 All:
    * Removed custom TLS curves list. OpenSSL 4.0 proposes post-quantum groups by default, and a custom list is a fingerprintable signature.

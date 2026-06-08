@@ -69,7 +69,8 @@ public:
                                                             const std::string &referringUsername, const std::string &email,
                                                             const std::string &voucherCode, const std::string &secureToken,
                                                             const std::string &captchaSolution, const std::vector<float> &captchaTrailX,
-                                                            const std::vector<float> &captchaTrailY, WSNetRequestFinishedCallback callback) = 0;
+                                                            const std::vector<float> &captchaTrailY, const std::string &attestationToken,
+                                                            WSNetRequestFinishedCallback callback) = 0;
 
     virtual std::shared_ptr<WSNetCancelableCallback> webSession(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
 
@@ -136,7 +137,8 @@ public:
                                                                        WSNetRequestFinishedCallback callback) = 0;
 
     virtual std::shared_ptr<WSNetCancelableCallback> regToken(WSNetRequestFinishedCallback callback) = 0;
-    virtual std::shared_ptr<WSNetCancelableCallback> signupUsingToken(const std::string &token, WSNetRequestFinishedCallback callback) = 0;
+    virtual std::shared_ptr<WSNetCancelableCallback> signupUsingToken(const std::string &token, const std::string &attestationToken,
+                                                                      WSNetRequestFinishedCallback callback) = 0;
 
     // claimAccount - optional integer but passed as a string. If the string is empty, the parameter is ignored
     virtual std::shared_ptr<WSNetCancelableCallback> claimAccount(const std::string &authHash, const std::string &username, const std::string &password,
@@ -155,7 +157,7 @@ public:
     virtual std::shared_ptr<WSNetCancelableCallback> cancelAccount(const std::string &authHash, const std::string &password,
                                                                        WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> sso(const std::string &provider, const std::string &token,
-                                                                   WSNetRequestFinishedCallback callback) = 0;
+                                                         const std::string &attestationToken, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> authTokenLogin(const std::string &username, bool useAsciiCaptcha, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> authTokenSignup(const std::string &username, bool useAsciiCaptcha, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> passwordRecovery(const std::string &email, WSNetRequestFinishedCallback callback) = 0;

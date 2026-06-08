@@ -168,7 +168,7 @@ void ApiResourcesManager::signup(const std::string &username, const std::string 
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->signup(
         username, password, referringUsername, email, voucherCode, secureToken,
-        captchaSolution, captchaTrailX, captchaTrailY,
+        captchaSolution, captchaTrailX, captchaTrailY, std::string(),
         std::bind(&ApiResourcesManager::onSignupAnswer, this, _1, _2,
                   username, password, referringUsername, email, voucherCode, secureToken,
                   captchaSolution, captchaTrailX, captchaTrailY));

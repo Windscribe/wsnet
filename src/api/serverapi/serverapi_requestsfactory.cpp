@@ -166,7 +166,8 @@ BaseRequest *serverapi_requests_factory::addEmail(const std::string &authHash, c
 
 BaseRequest *serverapi_requests_factory::signup(const std::string &username, const std::string &password, const std::string &referringUsername, const std::string &email,
                                                 const std::string &sessionTypeId, const std::string &voucherCode, const std::string &secureToken, const std::string &captchaSolution,
-                                                const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY, RequestFinishedCallback callback)
+                                                const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY,
+                                                const std::string &attestationToken, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["session_type_id"] = sessionTypeId;
@@ -175,6 +176,7 @@ BaseRequest *serverapi_requests_factory::signup(const std::string &username, con
     extraParams["referring_username"] = referringUsername;
     extraParams["email"] = email;
     extraParams["voucher_code"] = voucherCode;
+    extraParams["attestation_token"] = attestationToken;
     auto captchaParams = urlquery_utils::buildCaptchaParams(secureToken, captchaSolution, captchaTrailX, captchaTrailY);
     extraParams.insert(captchaParams.begin(), captchaParams.end());
     auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, "Users", extraParams, callback);
@@ -401,10 +403,11 @@ BaseRequest *serverapi_requests_factory::regToken(RequestFinishedCallback callba
     return request;
 }
 
-BaseRequest *serverapi_requests_factory::signupUsingToken(const std::string &token, RequestFinishedCallback callback)
+BaseRequest *serverapi_requests_factory::signupUsingToken(const std::string &token, const std::string &attestationToken, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["token"] = token;
+    extraParams["attestation_token"] = attestationToken;
     extraParams["session_type_id"] = "4";
     auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, "Users", extraParams, callback);
     request->setContentTypeHeader("Content-type: text/html; charset=utf-8");
@@ -478,10 +481,11 @@ BaseRequest *serverapi_requests_factory::cancelAccount(const std::string &authHa
     request->setBearerToken(authHash);
     return request;
 }
-BaseRequest *serverapi_requests_factory::sso(const std::string& provider, const std::string& token, RequestFinishedCallback callback)
+BaseRequest *serverapi_requests_factory::sso(const std::string& provider, const std::string& token, const std::string &attestationToken, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["token"] = token;
+    extraParams["attestation_token"] = attestationToken;
     std::string path = "Sso/" + provider;
     auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, path, extraParams, callback);
     request->setContentTypeHeader("Content-type: text/html; charset=utf-8");

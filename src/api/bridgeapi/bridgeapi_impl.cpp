@@ -16,6 +16,7 @@ BridgeAPI_impl::BridgeAPI_impl(WSNetHttpNetworkManager *httpNetworkManager, Pers
     connectState_(connectState),
     persistentSettings_(persistentSettings)
 {
+    std::lock_guard locker(sessionTokenMutex_);
     sessionTokens_ = persistentSettings_.sessionTokens();
 }
 
@@ -38,27 +39,26 @@ void BridgeAPI_impl::setConnectedState(bool isConnected)
     if (isConnected && !isConnected_) {
         std::string currentToken;
         auto token = sessionToken();
+        auto host = currentHost();
         if (token) {
             if (token->second > 0) {
                 // We have a valid token with an expiry time, check if it's expired
                 auto now = std::chrono::system_clock::now();
                 auto nowTimestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
                 if (nowTimestamp >= token->second) {
-                    g_logger->info("Removing expired session token for host '{}'", currentHost_);
-                    sessionTokens_.erase(currentHost_);
-                    persistentSettings_.setSessionTokens(sessionTokens_);
+                    g_logger->info("Removing expired session token for host '{}'", host);
+                    clearSessionToken();
                 } else {
                     // Token is not expired, set expiry time to 0 since it's valid until disconnection
                     currentToken = token->first;
-                    sessionTokens_[currentHost_].second = 0;
-                    persistentSettings_.setSessionTokens(sessionTokens_);
+                    setSessionTokenForCurrentHost(currentToken, 0);
                 }
             } else {
                 currentToken = token->first;
             }
         }
 
-        g_logger->info("BridgeAPI_impl::setConnectedState, fetching token for host '{}'{}", currentHost_, currentToken.empty() ? "" : " with cached token");
+        g_logger->info("BridgeAPI_impl::setConnectedState, fetching token for host '{}'{}", host, currentToken.empty() ? "" : " with cached token");
         isFetchingToken_ = true;
         auto request = std::unique_ptr<BaseRequest>(bridgeapi_requests_factory::fetchToken(currentToken, nullptr));
         executeRequestImpl(std::move(request));
@@ -110,6 +110,7 @@ void BridgeAPI_impl::executeRequest(std::unique_ptr<BaseRequest> request)
         request->callCallback();
         return;
     }
+    applySessionToken(request);
 
     // in the connected mode always use the primary domain
     executeRequestImpl(std::move(request));
@@ -173,10 +174,8 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
             if (isTokenRequest) {
                 isFetchingToken_ = false;
                 std::string newToken = tokenRequest->getSessionToken();
-                sessionTokens_[currentHost_] = {newToken, 0};
-                g_logger->info("Successfully received session token for host '{}'", currentHost_);
-
-                persistentSettings_.setSessionTokens(sessionTokens_);
+                setSessionTokenForCurrentHost(newToken, 0);
+                g_logger->info("Successfully received session token for host '{}'", currentHost());
 
                 // Notify that the API is now available
                 if (apiAvailableCallback_) {
@@ -186,14 +185,6 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
                 // Execute any queued pinIp request now that we have a token
                 if (queuedPinIpRequest_) {
                     g_logger->info("Executing queued pinIp request with fresh token");
-                    // Update the token on the request before executing
-                    auto bridgeRequest = dynamic_cast<BridgeAPIRequest*>(queuedPinIpRequest_.get());
-                    if (bridgeRequest) {
-                        auto token = sessionToken();
-                        if (token) {
-                            bridgeRequest->setSessionToken(token->first);
-                        }
-                    }
                     executeRequest(std::move(queuedPinIpRequest_));
                     queuedPinIpRequest_.reset();
                 }
@@ -211,7 +202,7 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         if (token && error->isSuccess()) {
             // We have an existing token and server told us it's no good (i.e. httpResponseCode != 200), try getting a new one
             clearSessionToken();
-            g_logger->info("Token request failed {} (HTTP response code: {}), clearing cached token for host '{}' and trying again", error->toString(), httpResponseCode, currentHost_);
+            g_logger->info("Token request failed {} (HTTP response code: {}), clearing cached token for host '{}' and trying again", error->toString(), httpResponseCode, currentHost());
             auto request = std::unique_ptr<BaseRequest>(bridgeapi_requests_factory::fetchToken("", nullptr));
             executeRequestImpl(std::move(request));
         } else {
@@ -243,18 +234,19 @@ void BridgeAPI_impl::onHttpNetworkRequestProgressCallback(std::uint64_t requestI
     }
 }
 
-const std::pair<std::string, std::int64_t> *BridgeAPI_impl::sessionToken() const
+std::optional<std::pair<std::string, std::int64_t>> BridgeAPI_impl::sessionToken() const
 {
+    std::lock_guard locker(sessionTokenMutex_);
     auto it = sessionTokens_.find(currentHost_);
     if (it != sessionTokens_.end()) {
-        return &it->second;
+        return it->second;
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 bool BridgeAPI_impl::hasSessionToken() const
 {
-    return sessionToken() != nullptr;
+    return sessionToken().has_value();
 }
 
 void BridgeAPI_impl::setApiAvailableCallback(WSNetApiAvailableCallback callback)
@@ -278,28 +270,75 @@ void BridgeAPI_impl::pinIp(std::unique_ptr<BaseRequest> request)
 
 void BridgeAPI_impl::clearSessionToken()
 {
-    sessionTokens_.erase(currentHost_);
-    persistentSettings_.setSessionTokens(sessionTokens_);
+    std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens;
+    {
+        std::lock_guard locker(sessionTokenMutex_);
+        sessionTokens_.erase(currentHost_);
+        sessionTokens = sessionTokens_;
+    }
+    persistentSettings_.setSessionTokens(sessionTokens);
 }
 
 void BridgeAPI_impl::setCurrentHost(const std::string &host)
 {
     g_logger->info("BridgeAPI_impl::setCurrentHost: '{}'", host);
+    std::lock_guard locker(sessionTokenMutex_);
     currentHost_ = host;
 }
 
 void BridgeAPI_impl::setSessionTokenExpiry()
 {
-    auto it = sessionTokens_.find(currentHost_);
-    if (it != sessionTokens_.end()) {
-        auto expiryTime = std::chrono::system_clock::now() + std::chrono::hours(24);
-        auto expiryTimestamp = std::chrono::duration_cast<std::chrono::seconds>(expiryTime.time_since_epoch()).count();
-        if (it->second.second == 0) {
-            it->second.second = expiryTimestamp;
-            persistentSettings_.setSessionTokens(sessionTokens_);
-            g_logger->info("Set session token expiry to 24 hours from disconnect for host '{}'", currentHost_);
+    std::string host;
+    std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens;
+    bool updated = false;
+    {
+        std::lock_guard locker(sessionTokenMutex_);
+        auto it = sessionTokens_.find(currentHost_);
+        if (it != sessionTokens_.end()) {
+            auto expiryTime = std::chrono::system_clock::now() + std::chrono::hours(24);
+            auto expiryTimestamp = std::chrono::duration_cast<std::chrono::seconds>(expiryTime.time_since_epoch()).count();
+            if (it->second.second == 0) {
+                it->second.second = expiryTimestamp;
+                host = currentHost_;
+                sessionTokens = sessionTokens_;
+                updated = true;
+            }
         }
     }
+    if (updated) {
+        persistentSettings_.setSessionTokens(sessionTokens);
+        g_logger->info("Set session token expiry to 24 hours from disconnect for host '{}'", host);
+    }
+}
+
+void BridgeAPI_impl::setSessionTokenForCurrentHost(const std::string &token, std::int64_t expiry)
+{
+    std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens;
+    {
+        std::lock_guard locker(sessionTokenMutex_);
+        sessionTokens_[currentHost_] = {token, expiry};
+        sessionTokens = sessionTokens_;
+    }
+    persistentSettings_.setSessionTokens(sessionTokens);
+}
+
+void BridgeAPI_impl::applySessionToken(std::unique_ptr<BaseRequest> &request) const
+{
+    auto bridgeRequest = dynamic_cast<BridgeAPIRequest*>(request.get());
+    if (!bridgeRequest) {
+        return;
+    }
+
+    auto token = sessionToken();
+    if (token) {
+        bridgeRequest->setSessionToken(token->first);
+    }
+}
+
+std::string BridgeAPI_impl::currentHost() const
+{
+    std::lock_guard locker(sessionTokenMutex_);
+    return currentHost_;
 }
 
 } // namespace wsnet

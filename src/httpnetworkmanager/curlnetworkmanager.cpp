@@ -396,8 +396,18 @@ bool CurlNetworkManager::setupOptions(RequestInfo *requestInfo, const std::share
             return false;
     }
 
+    if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_SIGNATURE_ALGORITHMS,
+        "mldsa65:mldsa87:mldsa44:ecdsa_secp256r1_sha256:ecdsa_secp384r1_sha384:ecdsa_secp521r1_sha512:ed25519:ed448:ecdsa_brainpoolP256r1tls13_sha256:ecdsa_brainpoolP384r1tls13_sha384:ecdsa_brainpoolP512r1tls13_sha512:rsa_pss_pss_sha256:rsa_pss_pss_sha384:rsa_pss_pss_sha512:rsa_pss_rsae_sha256:rsa_pss_rsae_sha384:rsa_pss_rsae_sha512:rsa_pkcs1_sha256:rsa_pkcs1_sha384:rsa_pkcs1_sha512:ecdsa_sha224:rsa_pss_rsae_sha256:rsa_pss_pss_sha256:RSA+SHA224:DSA+SHA224:DSA+SHA256:DSA+SHA384:DSA+SHA512") != CURLE_OK)
+        return false;
+    if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_EC_CURVES,
+        "X25519MLKEM768:x25519:secp256r1:x448:secp384r1:secp521r1:ffdhe2048:ffdhe3072") != CURLE_OK)
+        return false;
+
     if (request->isExtraTLSPadding()) {
-        if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_OPTIONS, CURLSSLOPT_TLSEXT_PADDING | CURLSSLOPT_TLSEXT_PADDING_SUPER) != CURLE_OK)
+        if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_OPTIONS, CURLSSLOPT_OP_LEGACY_EC_POINT_FORMATS | CURLSSLOPT_TLSEXT_PADDING | CURLSSLOPT_TLSEXT_PADDING_SUPER) != CURLE_OK)
+            return false;
+    } else {
+        if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_OPTIONS, CURLSSLOPT_OP_LEGACY_EC_POINT_FORMATS) != CURLE_OK)
             return false;
     }
 

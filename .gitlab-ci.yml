@@ -23,13 +23,13 @@ variables:
   NIGHTLY_TEST_BUILD: 'n'
   GIT_DEPTH: 0 # Full clone required to reach git tags for version detection
   VCPKG_ROOT_WINDOWS: 'c:\vcpkg'
-  VCPKG_DEFAULT_BINARY_CACHE_WINDOWS: 'c:\vcpkg_cache'
 
 .template_win10_build: &template_win10_build
   tags: [win10qty6]
   before_script:
     - $env:VCPKG_ROOT = $env:VCPKG_ROOT_WINDOWS
-    - $env:VCPKG_DEFAULT_BINARY_CACHE = $env:VCPKG_DEFAULT_BINARY_CACHE_WINDOWS
+    - $env:VCPKG_CA_BUNDLE = "$(Get-Location)\tools\cacert.pem"
+    - $env:VCPKG_BINARY_SOURCES = "clear;http,https://${env:NEXUS_USERNAME}:${env:NEXUS_PASSWORD}@nexus.int.windscribe.com/repository/client-desktop/client-desktop/vcpkg_cache/current/binary_cache/{sha}.zip,readwrite"
     - $env:VCPKG_INSTALL_OPTIONS = "--clean-after-build"
     - if (Test-Path ws-vcpkg-registry) { Remove-Item -Recurse -Force ws-vcpkg-registry }
     - git clone https://github.com/Windscribe/ws-vcpkg-registry.git
@@ -41,6 +41,8 @@ variables:
   before_script:
     - export VCPKG_ROOT="${HOME}/vcpkg"
     - export VCPKG_INSTALL_OPTIONS="--clean-after-build"
+    - export VCPKG_CA_BUNDLE="$(pwd)/tools/cacert.pem"
+    - export VCPKG_BINARY_SOURCES="clear;http,https://${NEXUS_USERNAME}:${NEXUS_PASSWORD}@nexus.int.windscribe.com/repository/client-desktop/client-desktop/vcpkg_cache/current/binary_cache/{sha}.zip,readwrite"
     - rm -rf ws-vcpkg-registry
     - git clone https://github.com/Windscribe/ws-vcpkg-registry.git
     - ./ws-vcpkg-registry/install-vcpkg/vcpkg_install.sh "${VCPKG_ROOT}" --configure-git
@@ -51,6 +53,7 @@ variables:
   before_script:
     - export VCPKG_ROOT="${HOME}/vcpkg"
     - export VCPKG_INSTALL_OPTIONS="--clean-after-build"
+    - export VCPKG_CA_BUNDLE="$(pwd)/tools/cacert.pem"
     - export VCPKG_BINARY_SOURCES="clear;http,https://${NEXUS_USERNAME}:${NEXUS_PASSWORD}@nexus.int.windscribe.com/repository/client-desktop/client-desktop/vcpkg_cache/current/binary_cache/{sha}.zip,readwrite"
     - rm -rf ws-vcpkg-registry
     - git clone https://github.com/Windscribe/ws-vcpkg-registry.git

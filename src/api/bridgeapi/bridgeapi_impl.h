@@ -26,7 +26,7 @@ public:
     void setConnectedState(bool isConnected);
     void setIgnoreSslErrors(bool bIgnore);
 
-    const std::pair<std::string, std::int64_t> *sessionToken() const;
+    std::optional<std::pair<std::string, std::int64_t>> sessionToken() const;
     bool hasSessionToken() const;
     void setApiAvailableCallback(WSNetApiAvailableCallback callback);
     void setCurrentHost(const std::string &host);
@@ -48,6 +48,9 @@ private:
     bool isFetchingToken_ = false;
     std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens_;
     std::string currentHost_;
+    // Mutations of sessionTokens_/currentHost_ happen only on the io_context thread;
+    // this mutex guards against off-thread readers such as hasSessionToken().
+    mutable std::mutex sessionTokenMutex_;
     std::unique_ptr<BaseRequest> queuedPinIpRequest_;
     WSNetApiAvailableCallback apiAvailableCallback_;
 
@@ -66,6 +69,9 @@ private:
 
     void clearSessionToken();
     void setSessionTokenExpiry();
+    void setSessionTokenForCurrentHost(const std::string &token, std::int64_t expiry);
+    void applySessionToken(std::unique_ptr<BaseRequest> &request) const;
+    std::string currentHost() const;
 };
 
 } // namespace wsnet
