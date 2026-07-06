@@ -14,7 +14,7 @@ ServerAPI::ServerAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManage
     connectState_(connectState),
     pingTest_(httpNetworkManager)
 {
-    impl_ = std::make_unique<ServerAPI_impl>(httpNetworkManager, failoverContainer, persistentSettings_, advancedParameters, connectState);
+    impl_ = std::make_unique<ServerAPI_impl>(io_context, httpNetworkManager, failoverContainer, persistentSettings_, advancedParameters, connectState);
     subscriberId_ = connectState_->subscribeConnectedToVpnState(std::bind(&ServerAPI::onVPNConnectStateChanged, this, std::placeholders::_1));
 }
 
@@ -164,10 +164,10 @@ std::shared_ptr<WSNetCancelableCallback> ServerAPI::signup(const std::string &us
                                                            const std::string &email, const std::string &voucherCode,
                                                            const std::string &secureToken, const std::string &captchaSolution,
                                                            const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY,
-                                                           const std::string &attestationToken, WSNetRequestFinishedCallback callback)
+                                                           const std::string &attestationToken, const std::string &installer, WSNetRequestFinishedCallback callback)
 {
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    BaseRequest *request = serverapi_requests_factory::signup(username, password, referringUsername, email, Settings::instance().sessionTypeId(), voucherCode, secureToken, captchaSolution, captchaTrailX, captchaTrailY, attestationToken, cancelableCallback);
+    BaseRequest *request = serverapi_requests_factory::signup(username, password, referringUsername, email, Settings::instance().sessionTypeId(), voucherCode, secureToken, captchaSolution, captchaTrailX, captchaTrailY, attestationToken, installer, cancelableCallback);
     boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
     return cancelableCallback;
 }
@@ -351,10 +351,10 @@ std::shared_ptr<WSNetCancelableCallback> ServerAPI::regToken(WSNetRequestFinishe
     return cancelableCallback;
 }
 
-std::shared_ptr<WSNetCancelableCallback> ServerAPI::signupUsingToken(const std::string &token, const std::string &attestationToken, WSNetRequestFinishedCallback callback)
+std::shared_ptr<WSNetCancelableCallback> ServerAPI::signupUsingToken(const std::string &token, const std::string &attestationToken, const std::string &installer, WSNetRequestFinishedCallback callback)
 {
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    BaseRequest *request = serverapi_requests_factory::signupUsingToken(token, attestationToken, cancelableCallback);
+    BaseRequest *request = serverapi_requests_factory::signupUsingToken(token, attestationToken, installer, cancelableCallback);
     boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
     return cancelableCallback;
 }
@@ -391,17 +391,17 @@ std::shared_ptr<WSNetCancelableCallback> ServerAPI::verifyTvLoginCode(const std:
     return cancelableCallback;
 }
 
-std::shared_ptr<WSNetCancelableCallback> ServerAPI::cancelAccount(const std::string &authHash, const std::string &password, WSNetRequestFinishedCallback callback)
+std::shared_ptr<WSNetCancelableCallback> ServerAPI::cancelAccount(const std::string &authHash, const std::string &password, const std::string &ssoToken, WSNetRequestFinishedCallback callback)
 {
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    BaseRequest *request = serverapi_requests_factory::cancelAccount(authHash, password, cancelableCallback);
+    BaseRequest *request = serverapi_requests_factory::cancelAccount(authHash, password, ssoToken, cancelableCallback);
     boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
     return cancelableCallback;
 }
-std::shared_ptr<WSNetCancelableCallback> ServerAPI::sso(const std::string &provider, const std::string &token, const std::string &attestationToken, WSNetRequestFinishedCallback callback)
+std::shared_ptr<WSNetCancelableCallback> ServerAPI::sso(const std::string &provider, const std::string &token, const std::string &attestationToken, const std::string &installer, WSNetRequestFinishedCallback callback)
 {
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    BaseRequest *request = serverapi_requests_factory::sso(provider, token, attestationToken, cancelableCallback);
+    BaseRequest *request = serverapi_requests_factory::sso(provider, token, attestationToken, installer, cancelableCallback);
     boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
     return cancelableCallback;
 }

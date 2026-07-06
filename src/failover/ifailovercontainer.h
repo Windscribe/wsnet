@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "basefailover.h"
 
 namespace wsnet {
@@ -20,6 +22,9 @@ public:
 
     // return failover by unique identifier or null if not found
     virtual std::unique_ptr<BaseFailover> failoverById(const std::string &failoverUniqueId, int *outInd = nullptr) = 0;
+
+    // return all failover unique identifiers in the order of their application (priority order).
+    virtual std::vector<std::string> allUids() const = 0;
 };
 
 } // namespace failover

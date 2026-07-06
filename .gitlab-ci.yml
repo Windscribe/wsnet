@@ -130,21 +130,42 @@ test:wsnet:win:
       -DVCPKG_HOST_TRIPLET=ws-x64-windows-static-release
       -DIS_BUILD_TESTS=ON
     - cmake --build build --config Release --parallel
-    - pip3 install pproxy
+    - python -m pip install pproxy
     - |
       $ok = $false
       for ($i = 1; $i -le 3; $i++) {
         Write-Host "=== Test attempt $i ==="
-        Get-Process "pproxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        $pp = Start-Process -NoNewWindow -PassThru pproxy -ArgumentList "-l","http://127.0.0.1:8080"
+        $proxyStarted = $false
+        $pp = $null
+        $proxyPort = $null
+        for ($proxyAttempt = 1; $proxyAttempt -le 3; $proxyAttempt++) {
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), 0)
+          $listener.Start()
+          $proxyPort = $listener.LocalEndpoint.Port
+          $listener.Stop()
+          $pp = Start-Process -NoNewWindow -PassThru python -ArgumentList "-m","pproxy","-l","http://127.0.0.1:$proxyPort"
+          Start-Sleep -Seconds 1
+          if (-not $pp.HasExited) {
+            $proxyStarted = $true
+            break
+          }
+          Write-Host "pproxy startup attempt $proxyAttempt failed on 127.0.0.1:$proxyPort"
+        }
+        if (-not $proxyStarted) { exit 1 }
+        $env:WSNET_TEST_HTTP_PROXY_PORT = "$proxyPort"
         & build/test/Release/wsnet_test.exe --gtest_output=xml:report_win.xml
         $code = $LASTEXITCODE
-        Stop-Process -Id $pp.Id -Force -ErrorAction SilentlyContinue
+        Remove-Item Env:WSNET_TEST_HTTP_PROXY_PORT -ErrorAction SilentlyContinue
+        if ($pp -and -not $pp.HasExited) { Stop-Process -Id $pp.Id -Force -ErrorAction SilentlyContinue }
         if ($code -eq 0) { $ok = $true; break }
+        if ($i -lt 3) {
+          Write-Host "Waiting 60 seconds before retry..."
+          Start-Sleep -Seconds 60
+        }
       }
       if (-not $ok) { exit 1 }
   after_script:
-    - Get-Process "pproxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; $true
+    - if ($env:WSNET_TEST_HTTP_PROXY_PORT) { Remove-Item Env:WSNET_TEST_HTTP_PROXY_PORT -ErrorAction SilentlyContinue }; $true
   rules:
     - if: $BUILD_WIN == "y" && $NIGHTLY_TEST_BUILD == "y"
   artifacts:
@@ -158,7 +179,9 @@ test:wsnet:win:
 test:wsnet:mac:
   <<: *template_mac_build
   stage: Test
-  needs: []
+  needs:
+    - job: test:wsnet:win
+      optional: true
   script:
     - cmake -B build -S .
       -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
@@ -173,17 +196,41 @@ test:wsnet:mac:
     - set +o pipefail
     - |
       FAILED=1
+      PPROXY_PID=""
+      cleanup_proxy() {
+        if [ -n "${PPROXY_PID:-}" ]; then
+          kill "${PPROXY_PID}" 2>/dev/null || true
+          wait "${PPROXY_PID}" 2>/dev/null || true
+          PPROXY_PID=""
+        fi
+      }
+      trap cleanup_proxy EXIT
       for attempt in 1 2 3; do
         echo "=== Test attempt $attempt ==="
-        if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
-        /usr/bin/python3 -m pproxy -l http://127.0.0.1:8080 &
-        PPROXY_PID=$!
-        if build/test/wsnet_test --gtest_output=xml:report_macos.xml; then
-          kill $PPROXY_PID 2>/dev/null || true
+        PROXY_STARTED=0
+        for proxy_attempt in 1 2 3; do
+          PROXY_PORT=$(/usr/bin/python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+          /usr/bin/python3 -m pproxy -l "http://127.0.0.1:${PROXY_PORT}" &
+          PPROXY_PID=$!
+          sleep 1
+          if kill -0 "${PPROXY_PID}" 2>/dev/null; then
+            PROXY_STARTED=1
+            break
+          fi
+          echo "pproxy startup attempt ${proxy_attempt} failed on 127.0.0.1:${PROXY_PORT}"
+          cleanup_proxy
+        done
+        if [ "${PROXY_STARTED}" -ne 1 ]; then exit 1; fi
+        if WSNET_TEST_HTTP_PROXY_PORT="${PROXY_PORT}" build/test/wsnet_test --gtest_output=xml:report_macos.xml; then
+          cleanup_proxy
           FAILED=0
           break
         fi
-        kill $PPROXY_PID 2>/dev/null || true
+        cleanup_proxy
+        if [ "${attempt}" -lt 3 ]; then
+          echo "Waiting 60 seconds before retry..."
+          sleep 60
+        fi
       done
       [ $FAILED -eq 0 ]
   coverage: /^\s*lines:\s*\d+.\d+\%/
@@ -206,7 +253,9 @@ test:wsnet:mac:
 test:wsnet:rhel:
   <<: *template_rhel_build
   stage: Test
-  needs: []
+  needs:
+    - job: test:wsnet:mac
+      optional: true
   script:
     - python3 -m pip install clang-tidy
     - cmake -B build -S .
@@ -222,17 +271,41 @@ test:wsnet:rhel:
     - set +o pipefail
     - |
       FAILED=1
+      PPROXY_PID=""
+      cleanup_proxy() {
+        if [ -n "${PPROXY_PID:-}" ]; then
+          kill "${PPROXY_PID}" 2>/dev/null || true
+          wait "${PPROXY_PID}" 2>/dev/null || true
+          PPROXY_PID=""
+        fi
+      }
+      trap cleanup_proxy EXIT
       for attempt in 1 2 3; do
         echo "=== Test attempt $attempt ==="
-        if [ "$(ps aux | grep -c [p]proxy)" -ne 0 ]; then ps aux | grep [p]proxy | awk '{print $2}' | xargs kill -9; fi
-        python3 -m pproxy -l http://127.0.0.1:8080 &
-        PPROXY_PID=$!
-        if build/test/wsnet_test --gtest_output=xml:report_linux.xml; then
-          kill $PPROXY_PID 2>/dev/null || true
+        PROXY_STARTED=0
+        for proxy_attempt in 1 2 3; do
+          PROXY_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+          python3 -m pproxy -l "http://127.0.0.1:${PROXY_PORT}" &
+          PPROXY_PID=$!
+          sleep 1
+          if kill -0 "${PPROXY_PID}" 2>/dev/null; then
+            PROXY_STARTED=1
+            break
+          fi
+          echo "pproxy startup attempt ${proxy_attempt} failed on 127.0.0.1:${PROXY_PORT}"
+          cleanup_proxy
+        done
+        if [ "${PROXY_STARTED}" -ne 1 ]; then exit 1; fi
+        if WSNET_TEST_HTTP_PROXY_PORT="${PROXY_PORT}" build/test/wsnet_test --gtest_output=xml:report_linux.xml; then
+          cleanup_proxy
           FAILED=0
           break
         fi
-        kill $PPROXY_PID 2>/dev/null || true
+        cleanup_proxy
+        if [ "${attempt}" -lt 3 ]; then
+          echo "Waiting 60 seconds before retry..."
+          sleep 60
+        fi
       done
       [ $FAILED -eq 0 ]
   coverage: /^\s*lines:\s*\d+.\d+\%/

@@ -8,6 +8,19 @@
 
 namespace wsnet {
 
+namespace {
+
+// Empty-valued params are dropped from requests, but the server needs the
+// installer param present on every signup: absent means a legacy client
+// that predates attestation. Normalize empty to the "none" sentinel so
+// clients do not have to manage that contract themselves.
+std::string normalizedInstaller(const std::string &installer)
+{
+    return installer.empty() ? "none" : installer;
+}
+
+} // namespace
+
 BaseRequest *serverapi_requests_factory::login(const std::string &username, const std::string &password, const std::string &code2fa,
                                                const std::string &sessionTypeId, const std::string &secureToken, const std::string &captchaSolution,
                                                const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY, RequestFinishedCallback callback)
@@ -167,7 +180,7 @@ BaseRequest *serverapi_requests_factory::addEmail(const std::string &authHash, c
 BaseRequest *serverapi_requests_factory::signup(const std::string &username, const std::string &password, const std::string &referringUsername, const std::string &email,
                                                 const std::string &sessionTypeId, const std::string &voucherCode, const std::string &secureToken, const std::string &captchaSolution,
                                                 const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY,
-                                                const std::string &attestationToken, RequestFinishedCallback callback)
+                                                const std::string &attestationToken, const std::string &installer, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["session_type_id"] = sessionTypeId;
@@ -177,6 +190,7 @@ BaseRequest *serverapi_requests_factory::signup(const std::string &username, con
     extraParams["email"] = email;
     extraParams["voucher_code"] = voucherCode;
     extraParams["attestation_token"] = attestationToken;
+    extraParams["installer"] = normalizedInstaller(installer);
     auto captchaParams = urlquery_utils::buildCaptchaParams(secureToken, captchaSolution, captchaTrailX, captchaTrailY);
     extraParams.insert(captchaParams.begin(), captchaParams.end());
     auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, "Users", extraParams, callback);
@@ -403,11 +417,12 @@ BaseRequest *serverapi_requests_factory::regToken(RequestFinishedCallback callba
     return request;
 }
 
-BaseRequest *serverapi_requests_factory::signupUsingToken(const std::string &token, const std::string &attestationToken, RequestFinishedCallback callback)
+BaseRequest *serverapi_requests_factory::signupUsingToken(const std::string &token, const std::string &attestationToken, const std::string &installer, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["token"] = token;
     extraParams["attestation_token"] = attestationToken;
+    extraParams["installer"] = normalizedInstaller(installer);
     extraParams["session_type_id"] = "4";
     auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, "Users", extraParams, callback);
     request->setContentTypeHeader("Content-type: text/html; charset=utf-8");
@@ -470,10 +485,11 @@ BaseRequest *serverapi_requests_factory::verifyTvLoginCode(const std::string &au
     return request;
 }
 
-BaseRequest *serverapi_requests_factory::cancelAccount(const std::string &authHash, const std::string &password, RequestFinishedCallback callback)
+BaseRequest *serverapi_requests_factory::cancelAccount(const std::string &authHash, const std::string &password, const std::string &ssoToken, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["password"] = password;
+    extraParams["token"] = ssoToken;
     extraParams["type"] = "account";
     extraParams["message"] = "iOS inapp deletetion";
     auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, "Cancel", extraParams, callback);
@@ -481,11 +497,12 @@ BaseRequest *serverapi_requests_factory::cancelAccount(const std::string &authHa
     request->setBearerToken(authHash);
     return request;
 }
-BaseRequest *serverapi_requests_factory::sso(const std::string& provider, const std::string& token, const std::string &attestationToken, RequestFinishedCallback callback)
+BaseRequest *serverapi_requests_factory::sso(const std::string& provider, const std::string& token, const std::string &attestationToken, const std::string &installer, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
     extraParams["token"] = token;
     extraParams["attestation_token"] = attestationToken;
+    extraParams["installer"] = normalizedInstaller(installer);
     std::string path = "Sso/" + provider;
     auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, path, extraParams, callback);
     request->setContentTypeHeader("Content-type: text/html; charset=utf-8");

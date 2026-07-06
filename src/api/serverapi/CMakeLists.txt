@@ -1,9 +1,10 @@
 target_sources(wsnet PRIVATE
     failedfailovers.h
+    failoverprobeexecutor.cpp
+    failoverprobeexecutor.h
     pingtest.cpp
     pingtest.h
-    requestexecuterviafailover.cpp
-    requestexecuterviafailover.h
+    probecache.h
     serverapi.cpp
     serverapi.h
     serverapi_impl.cpp

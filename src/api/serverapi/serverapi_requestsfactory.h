@@ -31,7 +31,8 @@ namespace serverapi_requests_factory
                         const std::string &sessionTypeId, const std::string &voucherCode,
                         const std::string &secureToken, const std::string &captchaSolution,
                         const std::vector<float> &captchaTrailX, const std::vector<float> &captchaTrailY,
-                        const std::string &attestationToken, RequestFinishedCallback callback);
+                        const std::string &attestationToken, const std::string &installer,
+                        RequestFinishedCallback callback);
 
 
     BaseRequest *webSession(const std::string &authHash, RequestFinishedCallback callback);
@@ -79,7 +80,7 @@ namespace serverapi_requests_factory
                                                                RequestFinishedCallback callback);
 
     BaseRequest *regToken(RequestFinishedCallback callback);
-    BaseRequest *signupUsingToken(const std::string &token, const std::string &attestationToken, RequestFinishedCallback callback);
+    BaseRequest *signupUsingToken(const std::string &token, const std::string &attestationToken, const std::string &installer, RequestFinishedCallback callback);
     BaseRequest *claimAccount(const std::string &authHash, const std::string &username, const std::string &password,
                               const std::string &email, const std::string &voucherCode, const std::string &claimAccount, RequestFinishedCallback callback);
 
@@ -89,8 +90,8 @@ namespace serverapi_requests_factory
                                          RequestFinishedCallback callback);
 
     BaseRequest *verifyTvLoginCode(const std::string &authHash, const std::string &xpressCode, RequestFinishedCallback callback);
-    BaseRequest *cancelAccount(const std::string &authHash, const std::string &password, RequestFinishedCallback callback);
-    BaseRequest *sso(const std::string &provider, const std::string &token, const std::string &attestationToken, RequestFinishedCallback callback);
+    BaseRequest *cancelAccount(const std::string &authHash, const std::string &password, const std::string &ssoToken, RequestFinishedCallback callback);
+    BaseRequest *sso(const std::string &provider, const std::string &token, const std::string &attestationToken, const std::string &installer, RequestFinishedCallback callback);
     BaseRequest *authTokenLogin(const std::string &username, bool useAsciiCaptcha, RequestFinishedCallback callback);
     BaseRequest *authTokenSignup(const std::string &username, bool useAsciiCaptcha, RequestFinishedCallback callback);
     BaseRequest *passwordRecovery(const std::string &email, RequestFinishedCallback callback);

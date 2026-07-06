@@ -24,6 +24,9 @@ public:
     // return failover by unique identifier or null if not found
     std::unique_ptr<BaseFailover> failoverById(const std::string &failoverUniqueId, int *outInd = nullptr) override;
 
+    // return all failover unique identifiers in priority order
+    std::vector<std::string> allUids() const override;
+
 private:
     WSNetHttpNetworkManager *httpNetworkManager_;
     std::vector<std::string> failovers_;

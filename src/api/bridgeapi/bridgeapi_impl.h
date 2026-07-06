@@ -61,6 +61,8 @@ private:
     std::map<std::uint64_t, HttpRequestInfo> activeHttpRequests_;
 
     void executeRequestImpl(std::unique_ptr<BaseRequest> request);
+    void completeRequestAsNoop(std::unique_ptr<BaseRequest> request);
+    bool isTokenRequestSuppressed() const;
     void setErrorCodeAndEmitRequestFinished(BaseRequest *request, ApiRetCode retCode);
 
     void onHttpNetworkRequestFinished(std::uint64_t requestId, std::uint32_t elapsedMs, std::shared_ptr<WSNetRequestError> error, const std::string &data);

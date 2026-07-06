@@ -4,7 +4,7 @@
 
 namespace wsnet {
 
-// Helper class used by ServerAPI and RequestExecuterViaFailover to manage failed domains (FailoverData objects)
+// Helper class used by ServerAPI_impl and FailoverProbeExecutor to manage failed domains (FailoverData objects)
 class FailedFailovers
 {
 public:

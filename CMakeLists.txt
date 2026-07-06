@@ -23,7 +23,12 @@ set(WSNET_GIT_DESCRIBE "unknown")
 if(GIT_FOUND)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} describe --tags --long
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        # Use this repo's own dir, not CMAKE_SOURCE_DIR: when wsnet is consumed via FetchContent,
+        # CMAKE_SOURCE_DIR points at the top-level consumer (e.g. client-desktop), so describing it
+        # would stamp the consumer's tag (or 0.0.0 when it has none) onto wsnet.  This runs before
+        # project(wsnet), so PROJECT_SOURCE_DIR is not set yet; CMAKE_CURRENT_SOURCE_DIR is correct
+        # both standalone and when fetched.
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         OUTPUT_VARIABLE WSNET_GIT_DESCRIBE
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
@@ -47,6 +52,14 @@ project(wsnet
     DESCRIPTION "The wsnet library for Windscribe client programs"
     LANGUAGES CXX
 )
+
+# wsnet ships Objective-C++ sources (pingmanager_apple.mm, simple_ping.mm).  Enable OBJCXX here so the
+# library is self-contained and does not depend on the consuming project enabling it first; otherwise
+# CMake fails at generate time with "CMAKE_OBJCXX_COMPILE_OBJECT not set".  Scoped to desktop macOS: on
+# iOS the toolchain file manages Objective-C(++) flags.
+if(APPLE AND NOT IOS)
+    enable_language(OBJCXX)
+endif()
 
 option(IS_BUILD_TESTS "Build the wsnet test suite (desktop only)" OFF)
 
@@ -95,6 +108,32 @@ add_library(wsnet::wsnet ALIAS wsnet)
 
 target_compile_features(wsnet PUBLIC cxx_std_17)
 
+# Windows binary hardening.  Mirrors the compiler/linker exploit mitigations applied by the
+# consuming Windscribe apps, so wsnet stays hardened even though it builds with its own settings.
+# wsnet is a STATIC lib on Windows, so the link options here only take effect if it is ever built
+# as a DLL/standalone; the compile options always instrument wsnet's object code, which is folded
+# into the final image.
+if (WIN32)
+    target_compile_options(wsnet PRIVATE
+        /guard:cf     # Control Flow Guard
+        /sdl          # additional security checks (superset of /GS)
+        /Qspectre     # Spectre v1 mitigation
+        /ZH:SHA_256   # SHA-256 source hashing in debug info (BinSkim BA2004)
+    )
+    target_link_options(wsnet PRIVATE
+        /guard:cf
+        /DYNAMICBASE              # ASLR
+        /NXCOMPAT                 # DEP
+        /HIGHENTROPYVA            # 64-bit ASLR
+        /DEPENDENTLOADFLAG:0x800  # resolve imports/delay-loads from System32 only (anti DLL-planting)
+    )
+    # /guard:ehcont is intentionally omitted: the linker refuses to mix ehcont and non-ehcont
+    # objects, so it cannot be enabled until the vcpkg static deps are also built with it.
+    if (NOT "${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64")
+        target_link_options(wsnet PRIVATE /CETCOMPAT)  # CET shadow stack (x64 only)
+    endif()
+endif()
+
 if (IS_BUILD_TESTS)
     if (NOT WIN32)
         target_compile_options(wsnet PRIVATE -g -O0 --coverage -fprofile-arcs -ftest-coverage)
@@ -115,11 +154,19 @@ target_include_directories(wsnet PRIVATE
 )
 
 if (WIN32)
+    # CARES_NO_DEPRECATED makes ares.h emit no deprecation attribute, so the deliberate use of the
+    # deprecated ares_getsock() in dnsresolver_cares.cpp produces no C4996.  Required because /sdl
+    # (above) promotes C4996 to an error that #pragma warning(suppress/disable) cannot override.
+    # TODO: migrate to ARES_OPT_EVENT_THREAD / ARES_OPT_SOCK_STATE_CB and drop this.  Note: Alexey
+    #       indicated this was attempted previously and caused issues on Android.
     target_compile_definitions(wsnet PRIVATE CMAKE_LIBRARY_LIBRARY
-                                  WINVER=0x0601
-                                  _WIN32_WINNT=0x0601
+                                  WINVER=0x0A00
+                                  _WIN32_WINNT=0x0A00
+                                  NTDDI_VERSION=0x0A000008
                                   WIN32_LEAN_AND_MEAN
-                                  PIO_APC_ROUTINE_DEFINED)
+                                  PIO_APC_ROUTINE_DEFINED
+                                  CARES_NO_DEPRECATED
+                                  _CRT_SECURE_NO_WARNINGS)
 
     set_target_properties(wsnet PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif (WIN32)

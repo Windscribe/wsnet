@@ -1,5 +1,8 @@
 #include "wsnet_utils_impl.h"
+
 #include "serverapi_requestsfactory.h"
+#include "serverapi_utils.h"
+#include "utils/cancelablecallback.h"
 
 namespace wsnet {
 
@@ -14,6 +17,9 @@ WSNetUtils_impl::WSNetUtils_impl(boost::asio::io_context &io_context, WSNetHttpN
 
 WSNetUtils_impl::~WSNetUtils_impl()
 {
+    for (auto &kv : activeRequests_) {
+        if (kv.second->httpAsyncCallback) kv.second->httpAsyncCallback->cancel();
+    }
     activeRequests_.clear();
 }
 
@@ -37,34 +43,97 @@ std::shared_ptr<WSNetCancelableCallback> WSNetUtils_impl::myIPViaFailover(int fa
 
 void WSNetUtils_impl::myIPViaFailover_impl(int failoverInd, std::unique_ptr<BaseRequest> request)
 {
-    using namespace std::placeholders;
-
     auto failover = failoverByInd(failoverInd);
-    RequestExecuterViaFailover *requestExecutorViaFailover = new RequestExecuterViaFailover(httpNetworkManager_, std::move(request), std::move(failover),
-                                                                                            false, false, advancedParameters_, failedFailovers_,
-                                                                       std::bind(&WSNetUtils_impl::onRequestExecuterViaFailoverFinished, this, _1, _2, _3, curUniqueId_));
-    activeRequests_[curUniqueId_] = std::unique_ptr<RequestExecuterViaFailover>(requestExecutorViaFailover);
-    curUniqueId_++;
-    requestExecutorViaFailover->start();
-}
-
-void WSNetUtils_impl::onRequestExecuterViaFailoverFinished(RequestExecuterRetCode retCode, std::unique_ptr<BaseRequest> request, FailoverData failoverData, std::uint64_t id)
-{
-    activeRequests_.erase(id);
-
-    if (retCode == RequestExecuterRetCode::kSuccess) {
-        request->callCallback();
-    } else if (retCode == RequestExecuterRetCode::kRequestCanceled) {
-        // nothing todo
-    } else if (retCode == RequestExecuterRetCode::kFailoverFailed) {
+    if (!failover) {
         request->setRetCode(ServerApiRetCode::kFailoverFailed);
         request->callCallback();
-    } else if (retCode == RequestExecuterRetCode::kConnectStateChanged) {
-        request->setRetCode(ServerApiRetCode::kNetworkError);
-        request->callCallback();
-    } else {
-        assert(false);
+        return;
     }
+
+    const auto id = curUniqueId_++;
+    auto pending = std::make_unique<PendingRequest>();
+    pending->request = std::move(request);
+    pending->failover = std::move(failover);
+    BaseFailover *failoverPtr = pending->failover.get();
+    activeRequests_[id] = std::move(pending);
+
+    std::vector<FailoverData> data;
+    const bool syncResult = failoverPtr->getData(
+        false, data,
+        [this, id](FailoverResult result, const std::vector<FailoverData> &data) {
+            onFailoverData(id, result, data);
+        });
+    if (syncResult) {
+        onFailoverData(id, FailoverResult::kSuccess, data);
+    }
+}
+
+void WSNetUtils_impl::onFailoverData(std::uint64_t id, FailoverResult result, const std::vector<FailoverData> &data)
+{
+    auto it = activeRequests_.find(id);
+    if (it == activeRequests_.end()) return;
+
+    if (result == FailoverResult::kNoNetwork) {
+        finishWithError(id, ServerApiRetCode::kNoNetworkConnection);
+        return;
+    }
+    if (result != FailoverResult::kSuccess || data.empty()) {
+        finishWithError(id, ServerApiRetCode::kFailoverFailed);
+        return;
+    }
+
+    runHttpRequest(id, data.front());
+}
+
+void WSNetUtils_impl::runHttpRequest(std::uint64_t id, const FailoverData &failoverData)
+{
+    using namespace std::placeholders;
+
+    auto it = activeRequests_.find(id);
+    if (it == activeRequests_.end()) return;
+
+    auto httpRequest = serverapi_utils::createHttpRequestWithFailoverParameters(
+        httpNetworkManager_, failoverData, it->second->request.get(),
+        false, advancedParameters_->isAPIExtraTLSPadding());
+    httpRequest->setIsDebugLogCurlError(true);
+
+    it->second->httpAsyncCallback = httpNetworkManager_->executeRequest(
+        httpRequest, id,
+        [this](std::uint64_t reqId, std::uint32_t /*elapsedMs*/, std::shared_ptr<WSNetRequestError> error, const std::string &data) {
+            onHttpFinished(reqId, error, data);
+        });
+}
+
+void WSNetUtils_impl::onHttpFinished(std::uint64_t id, std::shared_ptr<WSNetRequestError> error, const std::string &data)
+{
+    auto it = activeRequests_.find(id);
+    if (it == activeRequests_.end()) return;
+
+    auto pending = std::move(it->second);
+    activeRequests_.erase(it);
+
+    if (error->isNoNetworkError()) {
+        pending->request->setRetCode(ServerApiRetCode::kNoNetworkConnection);
+        pending->request->callCallback();
+        return;
+    }
+    if (!error->isSuccess()) {
+        pending->request->setRetCode(ServerApiRetCode::kNetworkError);
+        pending->request->callCallback();
+        return;
+    }
+    pending->request->handle(data);
+    pending->request->callCallback();
+}
+
+void WSNetUtils_impl::finishWithError(std::uint64_t id, ServerApiRetCode retCode)
+{
+    auto it = activeRequests_.find(id);
+    if (it == activeRequests_.end()) return;
+    auto pending = std::move(it->second);
+    activeRequests_.erase(it);
+    pending->request->setRetCode(retCode);
+    pending->request->callCallback();
 }
 
 std::unique_ptr<BaseFailover> WSNetUtils_impl::failoverByInd(int ind) const

@@ -14,7 +14,11 @@ enum class UpdateChannel { kRelease = 0, kBeta, kGuineaPig, kInternal };
 enum class ApiRetCode { kSuccess = 0, kNetworkError, kNoNetworkConnection, kIncorrectJson, kFailoverFailed, kNoToken, kBridgeApiError };
 typedef ApiRetCode ServerApiRetCode; // for backward compatibility
 typedef std::function<void(ApiRetCode apiRetCode, const std::string &jsonData)> WSNetRequestFinishedCallback;
-typedef std::function<void(std::uint32_t num, std::uint32_t count)> WSNetTryingBackupEndpointCallback;
+// Fired once when the parallel backup-domain (failover) search starts. It is a plain
+// status signal so the client can show e.g. "searching for backup domains". It carries no
+// arguments: the search probes domains in parallel and stops at the first working one, so
+// a meaningful "N of M" progress cannot be reported.
+typedef std::function<void()> WSNetTryingBackupEndpointCallback;
 
 class WSNetServerAPI : public scapix_object<WSNetServerAPI>
 {
@@ -32,7 +36,12 @@ public:
     // useful when you need to force reset from a client
     virtual void resetFailover() = 0;
 
-    // callback function allowing the caller to know which failover is used
+    // Registers a callback fired once when the parallel backup-domain search starts (the
+    // fast path with the primary/persisted domain failed and the library begins probing
+    // the backup domains). It is a plain status signal so the client can show e.g.
+    // "searching for backup domains"; the num/count arguments are unused (always 0)
+    // because the parallel probe stops at the first working domain and has no meaningful
+    // "N of M" progress.
     virtual std::shared_ptr<WSNetCancelableCallback> setTryingBackupEndpointCallback(WSNetTryingBackupEndpointCallback tryingBackupEndpointCallback) = 0;
 
     virtual std::shared_ptr<WSNetCancelableCallback> login(const std::string &username, const std::string &password, const std::string &code2fa,
@@ -65,11 +74,17 @@ public:
 
     // Required: username, password
     // Optionals: referringUsername, email
+    // installer: self-reported install source package (e.g. com.android.vending from
+    // getInstallSourceInfo on Android). All platforms should set this on a best-effort
+    // basis; pass whatever the platform reports, empty included — an empty value is
+    // normalized to the "none" sentinel so the param is always present on the request
+    // (absent installer means a legacy client server-side).
     virtual std::shared_ptr<WSNetCancelableCallback> signup(const std::string &username, const std::string &password,
                                                             const std::string &referringUsername, const std::string &email,
                                                             const std::string &voucherCode, const std::string &secureToken,
                                                             const std::string &captchaSolution, const std::vector<float> &captchaTrailX,
                                                             const std::vector<float> &captchaTrailY, const std::string &attestationToken,
+                                                            const std::string &installer,
                                                             WSNetRequestFinishedCallback callback) = 0;
 
     virtual std::shared_ptr<WSNetCancelableCallback> webSession(const std::string &authHash, WSNetRequestFinishedCallback callback) = 0;
@@ -138,6 +153,7 @@ public:
 
     virtual std::shared_ptr<WSNetCancelableCallback> regToken(WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> signupUsingToken(const std::string &token, const std::string &attestationToken,
+                                                                      const std::string &installer,
                                                                       WSNetRequestFinishedCallback callback) = 0;
 
     // claimAccount - optional integer but passed as a string. If the string is empty, the parameter is ignored
@@ -155,9 +171,11 @@ public:
     virtual std::shared_ptr<WSNetCancelableCallback> verifyTvLoginCode(const std::string &authHash, const std::string &xpressCode,
                                                                        WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> cancelAccount(const std::string &authHash, const std::string &password,
+                                                                       const std::string &ssoToken,
                                                                        WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> sso(const std::string &provider, const std::string &token,
-                                                         const std::string &attestationToken, WSNetRequestFinishedCallback callback) = 0;
+                                                         const std::string &attestationToken, const std::string &installer,
+                                                         WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> authTokenLogin(const std::string &username, bool useAsciiCaptcha, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> authTokenSignup(const std::string &username, bool useAsciiCaptcha, WSNetRequestFinishedCallback callback) = 0;
     virtual std::shared_ptr<WSNetCancelableCallback> passwordRecovery(const std::string &email, WSNetRequestFinishedCallback callback) = 0;

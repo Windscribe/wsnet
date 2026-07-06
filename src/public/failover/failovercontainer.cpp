@@ -20,6 +20,11 @@ int FailoverContainer::count() const
     return (int)failovers_.size();
 }
 
+std::vector<std::string> FailoverContainer::allUids() const
+{
+    return failovers_;
+}
+
 std::unique_ptr<BaseFailover> FailoverContainer::first()
 {
     return failoverById(FAILOVER_DEFAULT_HARDCODED);

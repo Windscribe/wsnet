@@ -54,12 +54,24 @@ public:
         return isLogApiResponce_;
     }
 
+    void setSuppressBridgeApiTokenRequest(bool isSuppress) override
+    {
+        std::lock_guard locker(mutex_);
+        isSuppressBridgeApiTokenRequest_ = isSuppress;
+    }
+    bool isSuppressBridgeApiTokenRequest() const override
+    {
+        std::lock_guard locker(mutex_);
+        return isSuppressBridgeApiTokenRequest_;
+    }
+
 private:
     mutable std::mutex mutex_;
     bool isAPIExtraTLSPadding_ = false;
     bool isIgnoreCountryOverride_ = false;
     std::string countryOverrideValue_;
     bool isLogApiResponce_ = false;
+    bool isSuppressBridgeApiTokenRequest_ = false;
 };
 
 } // namespace wsnet

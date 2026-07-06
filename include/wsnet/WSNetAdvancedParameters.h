@@ -23,6 +23,11 @@ public:
 
     virtual void setLogApiResponce(bool isEnabled) = 0;
     virtual bool isLogApiResponce() const = 0;
+
+    // When enabled, BridgeAPI will not fetch a session token from /v1/token
+    // after connecting. BridgeAPI calls that require the token become no-ops.
+    virtual void setSuppressBridgeApiTokenRequest(bool isSuppress) = 0;
+    virtual bool isSuppressBridgeApiTokenRequest() const = 0;
 };
 
 } // namespace wsnet

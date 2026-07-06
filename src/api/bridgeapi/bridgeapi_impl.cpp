@@ -37,9 +37,23 @@ BridgeAPI_impl::~BridgeAPI_impl()
 void BridgeAPI_impl::setConnectedState(bool isConnected)
 {
     if (isConnected && !isConnected_) {
+        auto host = currentHost();
+        if (isTokenRequestSuppressed()) {
+            isFetchingToken_ = false;
+            g_logger->info("BridgeAPI_impl::setConnectedState, suppressing token request for host '{}'", host);
+            if (apiAvailableCallback_) {
+                apiAvailableCallback_(false);
+            }
+            if (queuedPinIpRequest_) {
+                completeRequestAsNoop(std::move(queuedPinIpRequest_));
+                queuedPinIpRequest_.reset();
+            }
+            isConnected_ = isConnected;
+            return;
+        }
+
         std::string currentToken;
         auto token = sessionToken();
-        auto host = currentHost();
         if (token) {
             if (token->second > 0) {
                 // We have a valid token with an expiry time, check if it's expired
@@ -104,6 +118,11 @@ void BridgeAPI_impl::executeRequest(std::unique_ptr<BaseRequest> request)
         return;
     }
 
+    if (isTokenRequestSuppressed()) {
+        completeRequestAsNoop(std::move(request));
+        return;
+    }
+
     // Check if we need a token and don't have one
     if (!sessionToken()) {
         request->setRetCode(ApiRetCode::kNoToken);
@@ -128,6 +147,22 @@ void BridgeAPI_impl::executeRequestImpl(std::unique_ptr<BaseRequest> request)
                                                                 std::bind(&BridgeAPI_impl::onHttpNetworkRequestProgressCallback, this, _1, _2, _3));
     HttpRequestInfo hti { std::move(request), asyncCallback_};
     activeHttpRequests_[requestId] = std::move(hti);
+}
+
+void BridgeAPI_impl::completeRequestAsNoop(std::unique_ptr<BaseRequest> request)
+{
+    if (!request) {
+        return;
+    }
+
+    g_logger->info("BridgeAPI request '{}' no-op because token requests are suppressed", request->name());
+    request->setRetCode(ApiRetCode::kSuccess);
+    request->callCallback();
+}
+
+bool BridgeAPI_impl::isTokenRequestSuppressed() const
+{
+    return advancedParameters_ && advancedParameters_->isSuppressBridgeApiTokenRequest();
 }
 
 void BridgeAPI_impl::setErrorCodeAndEmitRequestFinished(BaseRequest *request, ApiRetCode retCode)

@@ -1,11 +1,42 @@
+1.5.26 (29/06/2026)
+All:
+   * Added an advanced parameter to suppress automatic Bridge API `/v1/token` requests and no-op Bridge API calls while token fetching is suppressed. #31
+
+
+1.5.25 (16/06/2026)
+All:
+   * Changed the account cancellation request parameter from `sso_token` to `token`.
+
+
+1.5.24 (15/06/2026)
+All:
+   * Added SSO token plumbing for account cancellation requests. #29
+
+
+1.5.23 (12/06/2026)
+All:
+   * Added Windows compiler/linker security settings.
+   * Updated Windows SDK floor target to Windows 10 2004 to match desktop app.
+
+
+1.5.22 (11/06/2026)
+All:
+   * Added an installer param to signup, token signup, and SSO requests for clients to self-report their install source (Play Store vs sideload) during attestation data collection. An empty value is normalized to the "none" sentinel inside the library so the param is always present on signup requests.
+
+
+1.5.21 (08/06/2026)
+All:
+   * Replaced sequential failover with a parallel myIP probe and persisted-UID fast path, adding a TTL probe cache and failover metrics logging. #10
+
+
 1.5.20 (08/06/2026)
 All:
-   * Fixed malformed persistent settings handling for non-string AmneziaWG config IDs and synchronized BridgeAPI session-token state.
+   * Fixed malformed persistent settings handling for non-string AmneziaWG config IDs and synchronized BridgeAPI session-token state. #26
 
 
 1.5.19 (05/06/2026)
 All:
-   * Use curve set, signature algorithms, and ec_point_formats exactly as Ubuntu 26.04 / Debian 13 / AltLinux Sisyphus.
+   * Use curve set, signature algorithms, and ec_point_formats exactly as Ubuntu 26.04 / Debian 13 / AltLinux Sisyphus. #25
 
 
 1.5.18 (26/05/2026)
@@ -107,7 +138,7 @@ All:
 
 1.4.9 (09/03/2026)
 All:
-   * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo.
+   * Added a PowerShell script for syncing a tagged release to ones local GitHub wsnet repo. #9
    * Added support for the new server list v2 API (inventory-based).
 
 
