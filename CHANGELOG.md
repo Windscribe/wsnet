@@ -1,3 +1,9 @@
+1.5.27 (07/07/2026)
+All:
+   * Updated dependencies: cURL 8.21.0, OpenSSL 4.0.1, c-ares 1.34.7.
+   * Fixed the CURLOPT_ECH option prefix ("ECL:" -> "ecl:"); curl only accepts the lowercase form, so ECH was silently not applied on previous curl versions and caused request timeouts with cURL 8.21.
+
+
 1.5.26 (29/06/2026)
 All:
    * Added an advanced parameter to suppress automatic Bridge API `/v1/token` requests and no-op Bridge API calls while token fetching is suppressed. #31

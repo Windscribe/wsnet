@@ -391,7 +391,7 @@ bool CurlNetworkManager::setupOptions(RequestInfo *requestInfo, const std::share
     if (!setupProxy(requestInfo)) return false;
 
     if (!request->echConfig().empty()) {
-        std::string tempStr = "ECL:" + request->echConfig();
+        std::string tempStr = "ecl:" + request->echConfig();
         if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_ECH, tempStr.c_str()) != CURLE_OK)
             return false;
     }
