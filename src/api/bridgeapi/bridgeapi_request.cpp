@@ -28,7 +28,13 @@ std::string BridgeAPIRequest::sessionToken() const
 
 std::string BridgeAPIRequest::url(const std::string &domain) const
 {
-    auto url = skyr::url("https://" + hostname(domain, subDomainType_) + "/" + name());
+    std::string rawUrl = "https://" + hostname(domain, subDomainType_) + "/" + name();
+    auto parsedUrl = skyr::make_url(rawUrl);
+    if (!parsedUrl) {
+        g_logger->error("BridgeAPIRequest: failed to parse URL: {}", rawUrl);
+        return rawUrl;
+    }
+    auto url = std::move(parsedUrl.value());
     if (requestType_ == HttpMethod::kGet || requestType_ == HttpMethod::kDelete) {
         auto &sp = url.search_parameters();
         for (auto &it : extraParams_) {

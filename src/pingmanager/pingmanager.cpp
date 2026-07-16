@@ -28,6 +28,11 @@ PingManager::PingManager(boost::asio::io_context &io_context, WSNetHttpNetworkMa
 PingManager::~PingManager()
 {
     g_logger->info("PingManager destructor started");
+    // Safe teardown relies on the io_context being stopped and its worker thread
+    // joined before this runs (see ~WSNet_impl in wsnet.cpp): no in-flight ping
+    // completion can execute concurrently with, or after, this destructor. Tear down
+    // processManager_ before map_ so the ProcessManager (whose child callbacks
+    // reference the PingMethods held in map_) is destroyed first.
     std::lock_guard locker(mutex_);
 #ifdef _WIN32
     eventCallbackManager_.stop();
@@ -42,7 +47,7 @@ PingManager::~PingManager()
 
 std::shared_ptr<WSNetCancelableCallback> PingManager::ping(const std::string &ip, const std::string &hostname, PingType pingType, WSNetPingCallback callback)
 {
-    //TODO: validate ip and hostname?
+    // ip and hostname are validated in each PingMethod::ping() before use.
     std::lock_guard locker(mutex_);
 
     auto callbackFunc = std::make_shared<CancelableCallback<WSNetPingCallback>>(callback);

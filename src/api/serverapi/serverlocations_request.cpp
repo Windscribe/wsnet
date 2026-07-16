@@ -19,7 +19,13 @@ std::string ServerLocationsRequest::url(const std::string &domain) const
 {
     isFromDisconnectedVPNState_ = !connectState_->isVPNConnected();
 
-    auto url = skyr::url("https://" + hostname(domain, subDomainType_) + "/" + name());
+    std::string rawUrl = "https://" + hostname(domain, subDomainType_) + "/" + name();
+    auto parsedUrl = skyr::make_url(rawUrl);
+    if (!parsedUrl) {
+        g_logger->error("ServerLocationsRequest: failed to parse URL: {}", rawUrl);
+        return rawUrl;
+    }
+    auto url = std::move(parsedUrl.value());
     auto &sp = url.search_parameters();
     for (auto &it : extraParams_)
         if (!it.second.empty())

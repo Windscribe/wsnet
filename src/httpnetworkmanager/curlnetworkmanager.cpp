@@ -1,5 +1,6 @@
 #include "curlnetworkmanager.h"
 #include <regex>
+#include <cmrc/cmrc.hpp>
 #include "utils/wsnet_logger.h"
 #include "utils/utils.h"
 #include "utils/crypto_utils.h"
@@ -7,7 +8,6 @@
 #include "settings.h"
 
 #include <openssl/opensslv.h>
-#include <openssl/ssl.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -17,12 +17,30 @@
 #include <TargetConditionals.h>
 #endif
 
+CMRC_DECLARE(wsnet);
+
 namespace wsnet {
 
 CurlNetworkManager::CurlNetworkManager(CurlFinishedCallback finishedCallback, CurlProgressCallback progressCallback, CurlReadyDataCallback readyDataCallback) :
     finishedCallback_(finishedCallback), progressCallback_(progressCallback), readyDataCallback_(readyDataCallback),
     finish_(false), multiHandle_(nullptr)
 {
+    auto fs = cmrc::wsnet::get_filesystem();
+    assert(fs.is_file("resources/certs_bundle.pem"));
+    assert(fs.is_file("resources/windscribe_cert.crt"));
+
+    // load certificates from bundle
+    auto fdBundle = fs.open("resources/certs_bundle.pem");
+    caBundlePem_.assign(fdBundle.begin(), fdBundle.end());
+
+    // load Windscribe certificates
+    auto fdCert = fs.open("resources/windscribe_cert.crt");
+    caBundlePem_.append("\n");
+    caBundlePem_.append(fdCert.begin(), fdCert.end());
+
+    caBundleBlob_.data = const_cast<char *>(caBundlePem_.data());
+    caBundleBlob_.len = caBundlePem_.size();
+    caBundleBlob_.flags = CURL_BLOB_NOCOPY;
 }
 
 CurlNetworkManager::~CurlNetworkManager()
@@ -238,19 +256,6 @@ void CurlNetworkManager::run()
     activeRequests_.clear();
 }
 
-CURLcode CurlNetworkManager::sslctx_function(CURL *curl, void *sslctx, void *parm)
-{
-    SSL_CTX *ctx = (SSL_CTX *)sslctx;
-
-    // Add certificates to the SSL context
-    X509_STORE *store = SSL_CTX_get_cert_store(ctx);
-    CertManager *certManager = static_cast<CertManager *>(parm);
-    for (int i = 0; i < certManager->count(); ++i)
-        X509_STORE_add_cert(store, certManager->getCert(i));
-
-    return CURLE_OK;
-}
-
 size_t CurlNetworkManager::writeDataCallback(void *ptr, size_t size, size_t count, void *ri)
 {
     RequestInfo *requestInfo = static_cast<RequestInfo *>(ri);
@@ -330,13 +335,18 @@ bool CurlNetworkManager::setupOptions(RequestInfo *requestInfo, const std::share
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_WRITEDATA, requestInfo) != CURLE_OK) return false;
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_ACCEPT_ENCODING, "") != CURLE_OK) return false;
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_URL, request->url().c_str()) != CURLE_OK) return false;
+    if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_DEFAULT) != CURLE_OK) return false;
 
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SOCKOPTFUNCTION, curlSocketCallback) != CURLE_OK) return false;
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SOCKOPTDATA, this) != CURLE_OK) return false;
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_CLOSESOCKETFUNCTION, curlCloseSocketCallback) != CURLE_OK) return false;
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_CLOSESOCKETDATA, this) != CURLE_OK) return false;
 
-    g_logger->debug("New curl request : {}", request->url().c_str());
+    std::string logUrl = request->url();
+    auto queryPos = logUrl.find('?');
+    if (queryPos != std::string::npos)
+        logUrl = logUrl.substr(0, queryPos);
+    g_logger->debug("New curl request : {}", logUrl);
 
     if (request->isEnableFreshConnect()) {
         if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_FRESH_CONNECT, 1L) != CURLE_OK) return false;
@@ -467,11 +477,10 @@ bool CurlNetworkManager::setupSslVerification(RequestInfo *requestInfo, const st
         if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_VERIFYPEER, 0) != CURLE_OK) return false;
         if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_VERIFYHOST, 0) != CURLE_OK) return false;
     } else  {
-        if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_CAINFO, 0) != CURLE_OK) return false;
+        // a CA blob overrides any compile-time default CA file path, so only the app-supplied bundle is trusted
+        if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_CAINFO_BLOB, &caBundleBlob_) != CURLE_OK) return false;
         if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_CAPATH, 0) != CURLE_OK) return false;
         if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_VERIFYPEER, 1) != CURLE_OK) return false;
-        if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_CTX_FUNCTION, *sslctx_function) != CURLE_OK) return false;
-        if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_SSL_CTX_DATA, &certManager_) != CURLE_OK) return false;
     }
 
     return true;
@@ -487,6 +496,10 @@ bool CurlNetworkManager::setupProxy(RequestInfo *requestInfo)
     proxyString = proxySettings_.address;
 
     if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_PROXY, proxyString.c_str()) != CURLE_OK)
+        return false;
+
+    // an https proxy handshake must also verify against the app-supplied bundle
+    if (curl_easy_setopt(requestInfo->curlEasyHandle, CURLOPT_PROXY_CAINFO_BLOB, &caBundleBlob_) != CURLE_OK)
         return false;
 
     if (!proxySettings_.username.empty())  {

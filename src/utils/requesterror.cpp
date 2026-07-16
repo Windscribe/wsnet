@@ -93,6 +93,11 @@ std::shared_ptr<WSNetRequestError> RequestError::createCaresTimeout()
     return std::make_shared<RequestError>(ARES_ETIMEOUT, RequestErrorType::kCurl);
 }
 
+std::shared_ptr<WSNetRequestError> RequestError::createCurlUrlError()
+{
+    return std::make_shared<RequestError>(CURLE_URL_MALFORMAT, RequestErrorType::kCurl);
+}
+
 
 } // namespace wsnet
 

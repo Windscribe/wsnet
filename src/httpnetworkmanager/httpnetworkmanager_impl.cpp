@@ -2,6 +2,7 @@
 #include <spdlog/spdlog.h>
 #include "utils/utils.h"
 #include "utils/requesterror.h"
+#include "utils/wsnet_logger.h"
 
 namespace wsnet {
 
@@ -27,6 +28,12 @@ void HttpNetworkManager_impl::executeRequest(const std::shared_ptr<WSNetHttpRequ
 {
     if (callbacks->isCanceled())
         return;
+
+    if (request->hostname().empty()) {
+        g_logger->error("HttpNetworkManager: rejecting request with invalid URL: {}", request->url());
+        callbacks->callFinished(id, 0, RequestError::createCurlUrlError(), std::string());
+        return;
+    }
 
     requestsMap_[curRequestId_] = RequestData { request, id, callbacks, std::chrono::steady_clock::now() };
 

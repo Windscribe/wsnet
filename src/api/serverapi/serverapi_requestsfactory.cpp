@@ -5,6 +5,9 @@
 #include "utils/urlquery_utils.h"
 #include <cpp-base64/base64.h>
 #include <cpp-base64/base64.cpp>
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
 
 namespace wsnet {
 
@@ -283,7 +286,16 @@ BaseRequest *serverapi_requests_factory::getRobertFilters(const std::string &aut
 BaseRequest *serverapi_requests_factory::setRobertFilter(const std::string &authHash, const std::string &id, std::int32_t status, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;
-    std::string json = "{\"filter\":\"" + id + "\", \"status\":" + std::to_string(status) + "}";
+    rapidjson::Document doc;
+    doc.SetObject();
+    auto &alloc = doc.GetAllocator();
+    doc.AddMember("filter", rapidjson::Value(id.c_str(), alloc), alloc);
+    doc.AddMember("status", status, alloc);
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound): false positive in rapidjson dtoa on the numeric-member serialization path
+    doc.Accept(writer);
+    std::string json = buffer.GetString();
     auto request = new SetRobertFilterRequest(HttpMethod::kPut, SubdomainType::kApi, RequestPriority::kNormal, "Robert/filter", extraParams, json, callback);
     request->setContentTypeHeader("Content-type: text/html; charset=utf-8");
     request->setBearerToken(authHash);

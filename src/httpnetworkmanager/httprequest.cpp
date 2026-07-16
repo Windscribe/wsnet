@@ -1,5 +1,6 @@
 #include "httprequest.h"
 #include <skyr/url.hpp>
+#include "utils/wsnet_logger.h"
 
 namespace wsnet {
 
@@ -32,8 +33,12 @@ HttpRequest::HttpRequest(const std::string &url, std::uint32_t timeoutMs, HttpMe
     pImpl_->httpMethod = httpMethod;
     pImpl_->isIgnoreSslErrors = isIgnoreSslErrors;
     pImpl_->postData = postData;
-    pImpl_->skyrUrl = skyr::url(url);
-    assert(!pImpl_->skyrUrl.is_empty_host());
+    auto parsedUrl = skyr::make_url(url);
+    if (parsedUrl && !parsedUrl.value().is_empty_host()) {
+        pImpl_->skyrUrl = std::move(parsedUrl.value());
+    } else {
+        g_logger->error("HttpRequest: failed to parse URL: {}", url);
+    }
 }
 
 HttpRequest::~HttpRequest()
@@ -135,8 +140,13 @@ std::string HttpRequest::sniDomain() const
 
 std::string HttpRequest::sniUrl() const
 {
+    if (pImpl_->skyrUrl.is_empty_host())
+        return pImpl_->url;
     skyr::url u = pImpl_->skyrUrl;
-    u.set_hostname(pImpl_->sniDomain);
+    if (auto ec = u.set_hostname(pImpl_->sniDomain)) {
+        g_logger->error("HttpRequest: failed to set SNI hostname '{}' on URL: {}", pImpl_->sniDomain, pImpl_->url);
+        return pImpl_->url;
+    }
     return u.c_str();
 }
 

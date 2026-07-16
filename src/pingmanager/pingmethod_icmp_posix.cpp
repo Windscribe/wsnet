@@ -17,7 +17,7 @@ PingMethodIcmp_posix::~PingMethodIcmp_posix()
 
 void PingMethodIcmp_posix::ping(bool isFromDisconnectedVpnState)
 {
-    if (!utils::isIpAddress(ip_)) {
+    if (!utils::isIpAddress(ip_) && !utils::isIpv6Address(ip_)) {
         g_logger->error("PingMethodIcmp_posix::ping incorrect IP-address: {}", ip_);
         callFinished();
         return;
@@ -26,7 +26,7 @@ void PingMethodIcmp_posix::ping(bool isFromDisconnectedVpnState)
     using namespace std::placeholders;
     isFromDisconnectedVpnState_ = isFromDisconnectedVpnState;
 
-    if (!processManager_->execute("ping", {"-c", "1", "-W", "2000", ip_}, std::bind(&PingMethodIcmp_posix::onProcessFinished, this, _1, _2))) {
+    if (!processManager_->execute("ping", {"-c", "1", "-W", "2", "-w", "2", ip_}, std::bind(&PingMethodIcmp_posix::onProcessFinished, this, _1, _2))) {
         g_logger->error("PingMethodIcmp_posix::ping cannot execute ping command");
         callFinished();
         return;
@@ -69,7 +69,11 @@ int PingMethodIcmp_posix::extractTimeMs(const std::string &str)
             val += str[ind];
             ind++;
         }
-        return (int)std::stof(val);
+        try {
+            return (int)std::stof(val);
+        } catch (...) {
+            return -1;
+        }
     }
 
     return -1;

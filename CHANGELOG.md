@@ -1,3 +1,13 @@
+1.5.29 (13/07/2026)
+All:
+   * Fixed TLS verification failing on Linux distros without a Debian-style CA bundle path (e.g. openSUSE): the embedded CA bundle is now supplied via CURLOPT_CAINFO_BLOB, so cURL 8.21's compile-time default CA file path is never loaded.
+
+
+1.5.28 (09/07/2026)
+All:
+   * Hardened URL construction and various components in response to a security audit. #32
+
+
 1.5.27 (07/07/2026)
 All:
    * Updated dependencies: cURL 8.21.0, OpenSSL 4.0.1, c-ares 1.34.7.

@@ -326,8 +326,8 @@ DnsServers DnsResolver_cares::getDefaultSystemConfiguration()
 #endif
     } else {
         char *servers = ares_get_servers_csv(tempChannel);
-        dnsServersDefaultConfiguration = DnsServers(servers);
         if (servers) {
+            dnsServersDefaultConfiguration = DnsServers(servers);
             ares_free_string(servers);
         }
         ares_destroy(tempChannel);

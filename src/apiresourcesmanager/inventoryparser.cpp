@@ -407,7 +407,7 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
                 group.pingHost = "http://" + pingServer.ip + ":6464/latency";
 
                 // Average net_load across all servers in this datacenter.
-                int totalNetLoad = 0;
+                long long totalNetLoad = 0;
                 for (const auto *srv : dcServers)
                     totalNetLoad += srv->netLoad;
                 group.netLoad = static_cast<int>(totalNetLoad / static_cast<int>(dcServers.size()));
@@ -483,7 +483,7 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
                 pingHost = "http://" + pingServer.ip + ":6464/latency";
 
                 // Average net_load across all servers in this datacenter.
-                int totalNetLoad = 0;
+                long long totalNetLoad = 0;
                 for (const auto *srv : dcServers)
                     totalNetLoad += srv->netLoad;
                 netLoad = static_cast<int>(totalNetLoad / static_cast<int>(dcServers.size()));

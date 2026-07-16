@@ -1,4 +1,6 @@
 #include "pingmethod_icmp_apple.h"
+#include "utils/utils.h"
+#include "utils/wsnet_logger.h"
 
 namespace wsnet {
 
@@ -15,6 +17,11 @@ PingMethodIcmp_apple::~PingMethodIcmp_apple()
 
 void PingMethodIcmp_apple::ping(bool isFromDisconnectedVpnState)
 {
+    if (!utils::isIpAddress(ip_) && !utils::isIpv6Address(ip_)) {
+        g_logger->error("PingMethodIcmp_apple::ping incorrect IP-address: {}", ip_);
+        callFinished();
+        return;
+    }
     pingManager_apple_.ping(ip_, std::bind(&PingMethodIcmp_apple::callback, this, std::placeholders::_1));
 }
 

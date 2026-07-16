@@ -1,6 +1,4 @@
 target_sources(wsnet PRIVATE
-    certmanager.cpp
-    certmanager.h
     curlnetworkmanager.h
     curlnetworkmanager.cpp
     httpnetworkmanager.h

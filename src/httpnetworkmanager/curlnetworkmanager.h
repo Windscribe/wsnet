@@ -9,7 +9,6 @@
 #include "WSNetHttpRequest.h"
 #include "WSNetHttpNetworkManager.h"
 #include "WSNetRequestError.h"
-#include "certmanager.h"
 #include "utils/cancelablecallback.h"
 
 namespace wsnet {
@@ -44,7 +43,8 @@ private:
     CurlProgressCallback progressCallback_;
     CurlReadyDataCallback readyDataCallback_;
 
-    CertManager certManager_;
+    std::string caBundlePem_;
+    struct curl_blob caBundleBlob_;
 
     std::mutex mutex_;
     std::condition_variable condition_;
@@ -93,7 +93,6 @@ private:
     std::shared_ptr<CancelableCallback<WSNetHttpNetworkManagerWhitelistSocketsCallback> > whitelistSocketsCallback_;
     std::set<int> whitelistSockets_;
 
-    static CURLcode sslctx_function(CURL *curl, void *sslctx, void *parm);
     static size_t writeDataCallback(void *ptr, size_t size, size_t count, void *ri);
     static int progressCallback(void *ri,   curl_off_t dltotal,   curl_off_t dlnow,   curl_off_t ultotal,   curl_off_t ulnow);
     static int curlSocketCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);

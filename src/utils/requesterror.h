@@ -24,6 +24,7 @@ public:
 
     static std::shared_ptr<WSNetRequestError> createCaresSuccess();
     static std::shared_ptr<WSNetRequestError> createCaresTimeout();
+    static std::shared_ptr<WSNetRequestError> createCurlUrlError();
 
 private:
     int errorCode_;
