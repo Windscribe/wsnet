@@ -1,3 +1,16 @@
+1.5.31 (12/08/2026)
+All:
+   * Replaced ApiResourcesManager's fixed 1-second failed-request retry delay with bounded per-resource exponential backoff (1s doubling to a 5-minute cap, with jitter), so clients no longer retry large resources such as /Inventory/servers and /Inventory/locations at a fixed 1 Hz rate during API outages. Offline answers keep the quick fixed retry since they never reach the API.
+   * Applied the same bounded exponential backoff to the login/session/signup network-error retry loops (previously fixed 1-second) and to the auth-token retry, which previously re-issued immediately with no delay at all. A new user-initiated login attempt resets the backoff, goes out immediately, and cancels the previously scheduled retry, so a stale retry can no longer re-submit old credentials on top of the new attempt. These interactive flows cap their retry delay at 1 minute instead of 5: their retries are silent, so the user is watching a spinner the whole time, and they are a small share of outage traffic next to the resource fetches.
+   * Non-2xx API responses are no longer parsed as success: previously an error page whose body happened to look like our JSON envelope could be stored as a fetched resource for 24 hours, win a failover probe (so a broken route kept being selected), or be reported as the device's IP by the myIP diagnostic. A 429/5xx now means "the API is temporarily unavailable": the request is retried on the same failover, paced by the retry backoff above, while any other status (a redirect, 4xx -- the usual signature of a fronting CDN or middlebox) replaces the route. A failover that answers nothing but HTTP errors for over 5 minutes is treated as broken and re-probed.
+   * Removed the unused SpeedRating API.
+
+
+1.5.30 (31/07/2026)
+All:
+   * Fixed logout being undone by an in-flight request whose answer restored the auth hash, logging the user back in on the next launch.
+
+
 1.5.29 (13/07/2026)
 All:
    * Fixed TLS verification failing on Linux distros without a Debian-style CA bundle path (e.g. openSUSE): the embedded CA bundle is now supplied via CURLOPT_CAINFO_BLOB, so cURL 8.21's compile-time default CA file path is never loaded.

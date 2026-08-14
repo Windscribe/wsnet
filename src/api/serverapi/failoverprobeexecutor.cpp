@@ -289,8 +289,16 @@ void FailoverProbeExecutor::onProbeFinished(std::uint64_t probeId, std::uint32_t
         return;
     }
 
+    // A probe must not accept an error page as proof that the route works: any non-2xx means
+    // something other than our API answered for this domain (or our API refused to), and a body
+    // that happens to look like our JSON envelope would otherwise let such a route win the probe
+    // and then fail every real request sent through it.
+    const bool isUsableHttpStatus =
+        error->isSuccess()
+        && serverapi_utils::verdictForHttpStatus(error->httpResponseCode()) == serverapi_utils::HttpStatusVerdict::kUsable;
+
     bool success = false;
-    if (error->isSuccess()) {
+    if (isUsableHttpStatus) {
         probe->probeRequest->handle(data);
         if (probe->probeRequest->retCode() == ApiRetCode::kSuccess) {
             success = true;
@@ -309,18 +317,18 @@ void FailoverProbeExecutor::onProbeFinished(std::uint64_t probeId, std::uint32_t
         return;
     }
 
-    // ret_code is only meaningful when the HTTP layer succeeded and handle() ran (e.g. the
-    // response was received but was invalid JSON). On a pure transport error handle() is
-    // skipped, so retCode() is still the BaseRequest default and would be misleading; log it
-    // only when it actually reflects the parsed response.
-    if (error->isSuccess()) {
-        g_logger->debug("{} event=probe_end uid={} domain={} duration_ms={} http_elapsed_ms={} result=fail error={} ret_code={}",
+    // ret_code is only meaningful when handle() ran (e.g. the response arrived with a usable
+    // status but was invalid JSON). On a transport error or a non-2xx status handle() is skipped,
+    // so retCode() is still the BaseRequest default and would be misleading; log it only when it
+    // actually reflects the parsed response.
+    if (isUsableHttpStatus) {
+        g_logger->debug("{} event=probe_end uid={} domain={} duration_ms={} http_elapsed_ms={} result=fail error={} http_status={} ret_code={}",
                         kFoMetricTag, failoverUid, probe->data.domain(), probeMs, elapsedMs,
-                        error->toString(), static_cast<int>(probe->probeRequest->retCode()));
+                        error->toString(), error->httpResponseCode(), static_cast<int>(probe->probeRequest->retCode()));
     } else {
-        g_logger->debug("{} event=probe_end uid={} domain={} duration_ms={} http_elapsed_ms={} result=fail error={}",
+        g_logger->debug("{} event=probe_end uid={} domain={} duration_ms={} http_elapsed_ms={} result=fail error={} http_status={}",
                         kFoMetricTag, failoverUid, probe->data.domain(), probeMs, elapsedMs,
-                        error->toString());
+                        error->toString(), error->httpResponseCode());
     }
     if (error->isNoNetworkError()) {
         // A no-network error is not the failover's fault, so do NOT blacklist this domain

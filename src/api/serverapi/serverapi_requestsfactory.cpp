@@ -241,19 +241,6 @@ BaseRequest *serverapi_requests_factory::debugLog(const std::string &username, c
     return request;
 }
 
-BaseRequest *serverapi_requests_factory::speedRating(const std::string &authHash, const std::string &hostname, const std::string &ip, std::int32_t rating, RequestFinishedCallback callback)
-{
-    std::map<std::string, std::string> extraParams;
-    extraParams["hostname"] = hostname;
-    extraParams["ip"] = ip;
-    extraParams["rating"] = std::to_string(rating);
-
-    auto request = new BaseRequest(HttpMethod::kPost, SubdomainType::kApi, RequestPriority::kNormal, "SpeedRating", extraParams, callback);
-    request->setContentTypeHeader("Content-type: text/html; charset=utf-8");
-    request->setBearerToken(authHash);
-    return request;
-}
-
 BaseRequest *serverapi_requests_factory::staticIps(const std::string &authHash, std::uint32_t version, const std::string &platform, const std::string &deviceId, RequestFinishedCallback callback)
 {
     std::map<std::string, std::string> extraParams;

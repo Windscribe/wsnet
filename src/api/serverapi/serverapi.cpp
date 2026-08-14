@@ -197,14 +197,6 @@ std::shared_ptr<WSNetCancelableCallback> ServerAPI::debugLog(const std::string &
     return cancelableCallback;
 }
 
-std::shared_ptr<WSNetCancelableCallback> ServerAPI::speedRating(const std::string &authHash, const std::string &hostname, const std::string &ip, std::int32_t rating, WSNetRequestFinishedCallback callback)
-{
-    auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    BaseRequest *request = serverapi_requests_factory::speedRating(authHash, hostname, ip, rating, cancelableCallback);
-    boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
-    return cancelableCallback;
-}
-
 std::shared_ptr<WSNetCancelableCallback> ServerAPI::staticIps(const std::string &authHash, std::uint32_t version, WSNetRequestFinishedCallback callback)
 {
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);

@@ -39,12 +39,14 @@ public:
 
     virtual ~WSNet_impl()
     {
-        apiResourcesManager_.reset();
         // This will cause the io_context run() call to return as soon as possible, abandoning unfinished operations and without permitting ready handlers to be dispatched.
         g_logger->info("wsnet io_context_.stop");
         io_context_.stop();
         g_logger->info("wsnet thread_.join");
         thread_.join();
+        // After the join, not before: stop() cannot preempt a handler already running, so destroying the
+        // manager first left a completion able to touch it after it was freed.
+        apiResourcesManager_.reset();
     }
 
     bool initializeImpl(const std::string &basePlatform,  const std::string &platformName, const std::string &appVersion, const std::string &deviceId,

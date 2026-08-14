@@ -16,6 +16,7 @@
 #include "failover/failoverdata.h"
 #include "failoverprobeexecutor.h"
 #include "probecache.h"
+#include "serverapi_utils.h"
 #include "utils/cancelablecallback.h"
 #include "utils/persistentsettings.h"
 #include "connectstate.h"
@@ -97,6 +98,14 @@ private:
     ApiOverrideSettings apiOverrideSettings_;
 
     std::optional<FailoverData> failoverData_;      // valid only in kReady state
+
+    // How long the current failover keeps the benefit of the doubt while it answers 429/5xx
+    // (see ApiUnavailableWindow). Sized so that a client rides out a backend outage on the
+    // route it already has, but a route that is broken rather than busy is replaced within
+    // minutes. It is compared against the retry cadence of the callers, whose backoff caps at
+    // 5 minutes (ApiResourcesManager), so escalation costs at most one re-probe per window.
+    static constexpr std::chrono::minutes kApiUnavailableDoubtWindow{5};
+    serverapi_utils::ApiUnavailableWindow apiUnavailableWindow_{kApiUnavailableDoubtWindow};
 
     // Current failover state.
     enum class FailoverState { kUnknown, kReady, kFailed } failoverState_;

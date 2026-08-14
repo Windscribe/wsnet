@@ -40,8 +40,6 @@ namespace serverapi_requests_factory
                                                           const std::string &osVersion, const std::string &osBuild,
                                                           RequestFinishedCallback callback);
     BaseRequest *debugLog(const std::string &username, const std::string &strLog, RequestFinishedCallback callback);
-    BaseRequest *speedRating(const std::string &authHash, const std::string &hostname, const std::string &ip,
-                                                         std::int32_t rating, RequestFinishedCallback callback);
 
     BaseRequest *staticIps(const std::string &authHash, std::uint32_t version, const std::string &platform, const std::string &deviceId, RequestFinishedCallback callback);
     BaseRequest *notifications(const std::string &authHash, const std::string &pcpid, const std::string &language, RequestFinishedCallback callback);

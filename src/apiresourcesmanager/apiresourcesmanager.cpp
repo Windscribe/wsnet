@@ -1,4 +1,5 @@
 #include "apiresourcesmanager.h"
+#include <algorithm>
 #include "utils/wsnet_logger.h"
 #include "utils/cancelablecallback.h"
 #include "utils/utils.h"
@@ -34,7 +35,7 @@ ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WS
         invRevision_ = persistentSettings_.invRevision() > 0
                            ? persistentSettings_.invRevision()
                            : storedRevision;
-        lastUpdateTimeMs_[RequestType::kInventoryServers] = { steady_clock::now(), true };
+        recordRequestResult(RequestType::kInventoryServers, ServerApiRetCode::kSuccess);
     }
 
     // Pre-build serverLocations_ from cache so the client has immediate data.
@@ -44,6 +45,10 @@ ApiResourcesManager::ApiResourcesManager(boost::asio::io_context &io_context, WS
 ApiResourcesManager::~ApiResourcesManager()
 {
     fetchTimer_.cancel();
+    if (loginRetryTimer_)
+        loginRetryTimer_->cancel();
+    if (authTokenRetryTimer_)
+        authTokenRetryTimer_->cancel();
     for (const auto &it : requestsInProgress_)
         it.second->cancel();
 }
@@ -87,7 +92,13 @@ bool ApiResourcesManager::isExist() const
 bool ApiResourcesManager::loginWithAuthHash()
 {
     std::lock_guard locker(mutex_);
+    loginRetryFailures_ = 0;
+    cancelPendingLoginRetry();
+    return loginWithAuthHashImpl();
+}
 
+bool ApiResourcesManager::loginWithAuthHashImpl()
+{
     if (requestsInProgress_.find(RequestType::kSessionStatus) != requestsInProgress_.end()) {
         g_logger->error("Incorrect use of API, ApiResourcesManager::loginWithAuthHash called twice");
         assert(false);
@@ -99,7 +110,7 @@ bool ApiResourcesManager::loginWithAuthHash()
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(
         persistentSettings_.authHash(), appleId_, gpDeviceId_, invRevision_, backup_,
-        std::bind(&ApiResourcesManager::onInitialSessionAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onInitialSessionAnswer, this, _1, _2)));
 
     return true;
 }
@@ -107,6 +118,13 @@ bool ApiResourcesManager::loginWithAuthHash()
 void ApiResourcesManager::authTokenLogin(const std::string &username, bool useAsciiCaptcha)
 {
     std::lock_guard locker(mutex_);
+    authTokenRetryFailures_ = 0;
+    cancelPendingAuthTokenRetry();
+    authTokenLoginImpl(username, useAsciiCaptcha);
+}
+
+void ApiResourcesManager::authTokenLoginImpl(const std::string &username, bool useAsciiCaptcha)
+{
     if (requestsInProgress_.find(RequestType::kAuthToken) != requestsInProgress_.end()) {
         g_logger->error("Incorrect use of API, ApiResourcesManager::authTokenLogin called twice");
         assert(false);
@@ -114,12 +132,19 @@ void ApiResourcesManager::authTokenLogin(const std::string &username, bool useAs
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kAuthToken] = serverAPI_->authTokenLogin(
         username, useAsciiCaptcha,
-        std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, true));
+        guarded(std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, true)));
 }
 
 void ApiResourcesManager::authTokenSignup(const std::string &username, bool useAsciiCaptcha)
 {
     std::lock_guard locker(mutex_);
+    authTokenRetryFailures_ = 0;
+    cancelPendingAuthTokenRetry();
+    authTokenSignupImpl(username, useAsciiCaptcha);
+}
+
+void ApiResourcesManager::authTokenSignupImpl(const std::string &username, bool useAsciiCaptcha)
+{
     if (requestsInProgress_.find(RequestType::kAuthToken) != requestsInProgress_.end()) {
         g_logger->error("Incorrect use of API, ApiResourcesManager::authTokenSignup called twice");
         assert(false);
@@ -127,7 +152,7 @@ void ApiResourcesManager::authTokenSignup(const std::string &username, bool useA
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kAuthToken] = serverAPI_->authTokenSignup(
         username, useAsciiCaptcha,
-        std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, false));
+        guarded(std::bind(&ApiResourcesManager::onAuthTokenAnswer, this, username, useAsciiCaptcha, _1, _2, false)));
 }
 
 void ApiResourcesManager::login(const std::string &username, const std::string &password,
@@ -137,7 +162,17 @@ void ApiResourcesManager::login(const std::string &username, const std::string &
                                 const std::vector<float> &captchaTrailY)
 {
     std::lock_guard locker(mutex_);
+    loginRetryFailures_ = 0;
+    cancelPendingLoginRetry();
+    loginImpl(username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY);
+}
 
+void ApiResourcesManager::loginImpl(const std::string &username, const std::string &password,
+                                    const std::string &code2fa, const std::string &secureToken,
+                                    const std::string &captchaSolution,
+                                    const std::vector<float> &captchaTrailX,
+                                    const std::vector<float> &captchaTrailY)
+{
     if (requestsInProgress_.find(RequestType::kSessionStatus) != requestsInProgress_.end()) {
         g_logger->error("Incorrect use of API, ApiResourcesManager::login called twice");
         assert(false);
@@ -146,9 +181,9 @@ void ApiResourcesManager::login(const std::string &username, const std::string &
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->login(
         username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY,
-        std::bind(&ApiResourcesManager::onLoginAnswer, this, _1, _2,
-                  username, password, code2fa, secureToken,
-                  captchaSolution, captchaTrailX, captchaTrailY));
+        guarded(std::bind(&ApiResourcesManager::onLoginAnswer, this, _1, _2,
+                          username, password, code2fa, secureToken,
+                          captchaSolution, captchaTrailX, captchaTrailY)));
 }
 
 void ApiResourcesManager::signup(const std::string &username, const std::string &password,
@@ -159,7 +194,19 @@ void ApiResourcesManager::signup(const std::string &username, const std::string 
                                   const std::vector<float> &captchaTrailY)
 {
     std::lock_guard locker(mutex_);
+    loginRetryFailures_ = 0;
+    cancelPendingLoginRetry();
+    signupImpl(username, password, referringUsername, email, voucherCode, secureToken,
+               captchaSolution, captchaTrailX, captchaTrailY);
+}
 
+void ApiResourcesManager::signupImpl(const std::string &username, const std::string &password,
+                                     const std::string &referringUsername, const std::string &email,
+                                     const std::string &voucherCode, const std::string &secureToken,
+                                     const std::string &captchaSolution,
+                                     const std::vector<float> &captchaTrailX,
+                                     const std::vector<float> &captchaTrailY)
+{
     if (requestsInProgress_.find(RequestType::kSessionStatus) != requestsInProgress_.end()) {
         g_logger->error("Incorrect use of API, ApiResourcesManager::signup called twice");
         assert(false);
@@ -169,19 +216,23 @@ void ApiResourcesManager::signup(const std::string &username, const std::string 
     requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->signup(
         username, password, referringUsername, email, voucherCode, secureToken,
         captchaSolution, captchaTrailX, captchaTrailY, std::string(), std::string(),
-        std::bind(&ApiResourcesManager::onSignupAnswer, this, _1, _2,
-                  username, password, referringUsername, email, voucherCode, secureToken,
-                  captchaSolution, captchaTrailX, captchaTrailY));
+        guarded(std::bind(&ApiResourcesManager::onSignupAnswer, this, _1, _2,
+                          username, password, referringUsername, email, voucherCode, secureToken,
+                          captchaSolution, captchaTrailX, captchaTrailY)));
 }
 
 void ApiResourcesManager::logout()
 {
     std::lock_guard locker(mutex_);
+
+    // Everything issued by the session being ended is now stale and will be dropped. The deleteSession
+    // below is the one exemption -- see locked().
+    ++sessionEpoch_;
     fetchTimer_.cancel();
 
     using namespace std::placeholders;
     serverAPI_->deleteSession(persistentSettings_.authHash(),
-                              std::bind(&ApiResourcesManager::onDeleteSessionAnswer, this, _1, _2));
+                              locked(std::bind(&ApiResourcesManager::onDeleteSessionAnswer, this, _1, _2)));
     clearValues();
 }
 
@@ -218,6 +269,8 @@ std::string ApiResourcesManager::authHash()
 void ApiResourcesManager::removeFromPersistentSettings()
 {
     std::lock_guard locker(mutex_);
+    ++sessionEpoch_;
+    fetchTimer_.cancel();
     clearValues();
 }
 
@@ -373,7 +426,7 @@ void ApiResourcesManager::handleLoginOrSessionAnswer(ServerApiRetCode serverApiR
                 if (!sessionStatus_->authHash().empty())
                     persistentSettings_.setAuthHash(sessionStatus_->authHash());
 
-                lastUpdateTimeMs_[RequestType::kSessionStatus] = { steady_clock::now(), true };
+                recordRequestResult(RequestType::kSessionStatus, ServerApiRetCode::kSuccess);
 
                 // Apply any inventory delta embedded in the login/session response.
                 applyInventoryDelta(jsonData);
@@ -383,7 +436,7 @@ void ApiResourcesManager::handleLoginOrSessionAnswer(ServerApiRetCode serverApiR
                 fetchAll();
 
                 fetchTimer_.async_wait(
-                    std::bind(&ApiResourcesManager::onFetchTimer, this, std::placeholders::_1));
+                    guarded(std::bind(&ApiResourcesManager::onFetchTimer, this, std::placeholders::_1)));
 
             } else if (ss->errorCode() == SessionErrorCode::kBadUsername) {
                 callback_->call(ApiResourcesManagerNotification::kLoginFailed, LoginResult::kBadUsername, ss->errorMessage());
@@ -519,7 +572,7 @@ bool ApiResourcesManager::fetchSession(const std::string &authHash)
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kSessionStatus] = serverAPI_->session(
         authHash, appleId_, gpDeviceId_, invRevision_, backup_,
-        std::bind(&ApiResourcesManager::onSessionAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onSessionAnswer, this, _1, _2)));
     return true;
 }
 
@@ -531,7 +584,7 @@ void ApiResourcesManager::fetchInventoryLocations()
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kInventoryLocations] = serverAPI_->getLocations(
         persistentSettings_.authHash(),
-        std::bind(&ApiResourcesManager::onInventoryLocationsAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onInventoryLocationsAnswer, this, _1, _2)));
 }
 
 bool ApiResourcesManager::fetchInventoryServers()
@@ -542,7 +595,7 @@ bool ApiResourcesManager::fetchInventoryServers()
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kInventoryServers] = serverAPI_->getServers(
         persistentSettings_.authHash(), backup_,
-        std::bind(&ApiResourcesManager::onInventoryServersAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onInventoryServersAnswer, this, _1, _2)));
     return true;
 }
 
@@ -555,10 +608,10 @@ void ApiResourcesManager::fetchStaticIps(const std::string &authHash)
         using namespace std::placeholders;
         requestsInProgress_[RequestType::kStaticIps] = serverAPI_->staticIps(
             authHash, 2,
-            std::bind(&ApiResourcesManager::onStaticIpsAnswer, this, _1, _2));
+            guarded(std::bind(&ApiResourcesManager::onStaticIpsAnswer, this, _1, _2)));
     } else {
         persistentSettings_.setStaticIps("{}");
-        lastUpdateTimeMs_[RequestType::kStaticIps] = { steady_clock::now(), true };
+        recordRequestResult(RequestType::kStaticIps, ServerApiRetCode::kSuccess);
         if (isLoginOkEmitted_)
             callback_->call(ApiResourcesManagerNotification::kStaticIpsUpdated, LoginResult::kSuccess, std::string());
         else
@@ -573,7 +626,7 @@ void ApiResourcesManager::fetchServerConfigs(const std::string &authHash)
 
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kServerConfigs] = serverAPI_->serverConfigs(
-        authHash, std::bind(&ApiResourcesManager::onServerConfigsAnswer, this, _1, _2));
+        authHash, guarded(std::bind(&ApiResourcesManager::onServerConfigsAnswer, this, _1, _2)));
 }
 
 void ApiResourcesManager::fetchServerCredentialsOpenVpn(const std::string &authHash)
@@ -584,7 +637,7 @@ void ApiResourcesManager::fetchServerCredentialsOpenVpn(const std::string &authH
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kServerCredentialsOpenVPN] = serverAPI_->serverCredentials(
         authHash, true,
-        std::bind(&ApiResourcesManager::onServerCredentialsOpenVpnAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onServerCredentialsOpenVpnAnswer, this, _1, _2)));
 }
 
 void ApiResourcesManager::fetchServerCredentialsIkev2(const std::string &authHash)
@@ -595,7 +648,7 @@ void ApiResourcesManager::fetchServerCredentialsIkev2(const std::string &authHas
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kServerCredentialsIkev2] = serverAPI_->serverCredentials(
         authHash, false,
-        std::bind(&ApiResourcesManager::onServerCredentialsIkev2Answer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onServerCredentialsIkev2Answer, this, _1, _2)));
 }
 
 void ApiResourcesManager::fetchPortMap(const std::string &authHash)
@@ -606,7 +659,7 @@ void ApiResourcesManager::fetchPortMap(const std::string &authHash)
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kPortMap] = serverAPI_->portMap(
         authHash, 6, std::vector<std::string>(),
-        std::bind(&ApiResourcesManager::onPortMapAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onPortMapAnswer, this, _1, _2)));
 }
 
 void ApiResourcesManager::fetchNotifications(const std::string &authHash)
@@ -617,7 +670,7 @@ void ApiResourcesManager::fetchNotifications(const std::string &authHash)
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kNotifications] = serverAPI_->notifications(
         authHash, pcpidNotifications_,
-        std::bind(&ApiResourcesManager::onNotificationsAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onNotificationsAnswer, this, _1, _2)));
 }
 
 void ApiResourcesManager::fetchCheckUpdate()
@@ -629,7 +682,7 @@ void ApiResourcesManager::fetchCheckUpdate()
     requestsInProgress_[RequestType::kCheckUpdate] = serverAPI_->checkUpdate(
         checkUpdateData_.channel, checkUpdateData_.appVersion, checkUpdateData_.appBuild,
         checkUpdateData_.osVersion, checkUpdateData_.osBuild,
-        std::bind(&ApiResourcesManager::onCheckUpdateAnswer, this, _1, _2));
+        guarded(std::bind(&ApiResourcesManager::onCheckUpdateAnswer, this, _1, _2)));
 }
 
 void ApiResourcesManager::fetchAmneziawgUnblockParams(const std::string &authHash)
@@ -639,7 +692,7 @@ void ApiResourcesManager::fetchAmneziawgUnblockParams(const std::string &authHas
 
     using namespace std::placeholders;
     requestsInProgress_[RequestType::kAmneziawgUnblockParams] = serverAPI_->amneziawgUnblockParams(
-        authHash, std::bind(&ApiResourcesManager::onAmneziawgUnblockParamsAnswer, this, _1, _2));
+        authHash, guarded(std::bind(&ApiResourcesManager::onAmneziawgUnblockParamsAnswer, this, _1, _2)));
 }
 
 // ---------------------------------------------------------------------------
@@ -722,8 +775,6 @@ void ApiResourcesManager::onFetchTimer(const boost::system::error_code &err)
 {
     if (err) return;
 
-    std::lock_guard locker(mutex_);
-
     if (!persistentSettings_.authHash().empty()) {
         fetchAll();
     } else {
@@ -732,7 +783,7 @@ void ApiResourcesManager::onFetchTimer(const boost::system::error_code &err)
     }
 
     fetchTimer_.expires_after(boost::asio::chrono::seconds(1));
-    fetchTimer_.async_wait(std::bind(&ApiResourcesManager::onFetchTimer, this, std::placeholders::_1));
+    fetchTimer_.async_wait(guarded(std::bind(&ApiResourcesManager::onFetchTimer, this, std::placeholders::_1)));
 }
 
 // ---------------------------------------------------------------------------
@@ -743,15 +794,19 @@ void ApiResourcesManager::onAuthTokenAnswer(const std::string &username, bool us
                                              ServerApiRetCode serverApiRetCode,
                                              const std::string &jsonData, bool isLoginCall)
 {
-    std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kAuthToken);
 
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        boost::asio::post(io_context_, [this, username, useAsciiCaptcha, isLoginCall] {
-            if (isLoginCall) authTokenLogin(username, useAsciiCaptcha);
-            else             authTokenSignup(username, useAsciiCaptcha);
+        scheduleInteractiveRetry(authTokenRetryTimer_, authTokenRetryFailures_, "onAuthTokenAnswer",
+                                 [this, username, useAsciiCaptcha, isLoginCall] {
+            if (isLoginCall) authTokenLoginImpl(username, useAsciiCaptcha);
+            else             authTokenSignupImpl(username, useAsciiCaptcha);
         });
-    } else if (serverApiRetCode == ServerApiRetCode::kNoNetworkConnection) {
+        return;
+    }
+
+    authTokenRetryFailures_ = 0;
+    if (serverApiRetCode == ServerApiRetCode::kNoNetworkConnection) {
         callback_->call(ApiResourcesManagerNotification::kAuthTokenFinished, LoginResult::kNoConnectivity, std::string());
     } else if (serverApiRetCode == ServerApiRetCode::kIncorrectJson) {
         callback_->call(ApiResourcesManagerNotification::kAuthTokenFinished, LoginResult::kIncorrectJson, std::string());
@@ -766,16 +821,13 @@ void ApiResourcesManager::onAuthTokenAnswer(const std::string &username, bool us
 void ApiResourcesManager::onInitialSessionAnswer(ServerApiRetCode serverApiRetCode,
                                                   const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kSessionStatus);
 
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        auto timer = std::make_shared<boost::asio::steady_timer>(io_context_);
-        timer->expires_after(std::chrono::seconds(1));
-        timer->async_wait([this, timer](const boost::system::error_code &ec) {
-            if (!ec) loginWithAuthHash();
-        });
+        scheduleInteractiveRetry(loginRetryTimer_, loginRetryFailures_, "onInitialSessionAnswer",
+                                 [this] { loginWithAuthHashImpl(); });
     } else {
+        loginRetryFailures_ = 0;
         handleLoginOrSessionAnswer(serverApiRetCode, jsonData);
     }
 }
@@ -787,17 +839,16 @@ void ApiResourcesManager::onLoginAnswer(ServerApiRetCode serverApiRetCode, const
                                          const std::vector<float> &captchaTrailX,
                                          const std::vector<float> &captchaTrailY)
 {
-    std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kSessionStatus);
 
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        auto timer = std::make_shared<boost::asio::steady_timer>(io_context_);
-        timer->expires_after(std::chrono::seconds(1));
-        timer->async_wait([this, timer, username, password, code2fa, secureToken,
-                           captchaSolution, captchaTrailX, captchaTrailY](const boost::system::error_code &ec) {
-            if (!ec) login(username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY);
+        scheduleInteractiveRetry(loginRetryTimer_, loginRetryFailures_, "onLoginAnswer",
+                                 [this, username, password, code2fa, secureToken,
+                                  captchaSolution, captchaTrailX, captchaTrailY] {
+            loginImpl(username, password, code2fa, secureToken, captchaSolution, captchaTrailX, captchaTrailY);
         });
     } else {
+        loginRetryFailures_ = 0;
         handleLoginOrSessionAnswer(serverApiRetCode, jsonData);
     }
 }
@@ -810,26 +861,23 @@ void ApiResourcesManager::onSignupAnswer(ServerApiRetCode serverApiRetCode, cons
                                           const std::vector<float> &captchaTrailX,
                                           const std::vector<float> &captchaTrailY)
 {
-    std::lock_guard locker(mutex_);
     requestsInProgress_.erase(RequestType::kSessionStatus);
 
     if (serverApiRetCode == ServerApiRetCode::kNetworkError) {
-        auto timer = std::make_shared<boost::asio::steady_timer>(io_context_);
-        timer->expires_after(std::chrono::seconds(1));
-        timer->async_wait([this, timer, username, password, referringUsername, email, voucherCode,
-                           secureToken, captchaSolution, captchaTrailX, captchaTrailY](const boost::system::error_code &ec) {
-            if (!ec) signup(username, password, referringUsername, email, voucherCode, secureToken,
-                            captchaSolution, captchaTrailX, captchaTrailY);
+        scheduleInteractiveRetry(loginRetryTimer_, loginRetryFailures_, "onSignupAnswer",
+                                 [this, username, password, referringUsername, email, voucherCode,
+                                  secureToken, captchaSolution, captchaTrailX, captchaTrailY] {
+            signupImpl(username, password, referringUsername, email, voucherCode, secureToken,
+                       captchaSolution, captchaTrailX, captchaTrailY);
         });
     } else {
+        loginRetryFailures_ = 0;
         handleLoginOrSessionAnswer(serverApiRetCode, jsonData);
     }
 }
 
 void ApiResourcesManager::onSessionAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         std::unique_ptr<SessionStatus> ss(SessionStatus::createFromJson(jsonData));
         if (ss) {
@@ -849,15 +897,13 @@ void ApiResourcesManager::onSessionAnswer(ServerApiRetCode serverApiRetCode, con
         }
     }
 
-    lastUpdateTimeMs_[RequestType::kSessionStatus] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kSessionStatus, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kSessionStatus);
 }
 
 void ApiResourcesManager::onInventoryLocationsAnswer(ServerApiRetCode serverApiRetCode,
                                                       const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         auto parsed = InventoryParser::parseLocations(jsonData);
         if (!parsed.empty()) {
@@ -885,15 +931,13 @@ void ApiResourcesManager::onInventoryLocationsAnswer(ServerApiRetCode serverApiR
         }
     }
 
-    lastUpdateTimeMs_[RequestType::kInventoryLocations] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kInventoryLocations, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kInventoryLocations);
 }
 
 void ApiResourcesManager::onInventoryServersAnswer(ServerApiRetCode serverApiRetCode,
                                                     const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
-
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         std::map<int, InventoryServer> newServers;
         std::int64_t newRevision = 0;
@@ -937,78 +981,72 @@ void ApiResourcesManager::onInventoryServersAnswer(ServerApiRetCode serverApiRet
         }
     }
 
-    lastUpdateTimeMs_[RequestType::kInventoryServers] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kInventoryServers, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kInventoryServers);
 }
 
 void ApiResourcesManager::onStaticIpsAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setStaticIps(jsonData);
         checkForReadyLogin();
         if (isLoginOkEmitted_)
             callback_->call(ApiResourcesManagerNotification::kStaticIpsUpdated, LoginResult::kSuccess, std::string());
     }
-    lastUpdateTimeMs_[RequestType::kStaticIps] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kStaticIps, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kStaticIps);
 }
 
 void ApiResourcesManager::onServerConfigsAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setServerConfigs(jsonData);
         isServerConfigsReceived_ = true;
         checkForServerCredentialsFetchFinished();
         checkForReadyLogin();
     }
-    lastUpdateTimeMs_[RequestType::kServerConfigs] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kServerConfigs, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kServerConfigs);
 }
 
 void ApiResourcesManager::onServerCredentialsOpenVpnAnswer(ServerApiRetCode serverApiRetCode,
                                                             const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setServerCredentialsOvpn(jsonData);
         isOpenVpnCredentialsReceived_ = true;
         checkForServerCredentialsFetchFinished();
         checkForReadyLogin();
     }
-    lastUpdateTimeMs_[RequestType::kServerCredentialsOpenVPN] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kServerCredentialsOpenVPN, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kServerCredentialsOpenVPN);
 }
 
 void ApiResourcesManager::onServerCredentialsIkev2Answer(ServerApiRetCode serverApiRetCode,
                                                           const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setServerCredentialsIkev2(jsonData);
         isIkev2CredentialsReceived_ = true;
         checkForServerCredentialsFetchFinished();
         checkForReadyLogin();
     }
-    lastUpdateTimeMs_[RequestType::kServerCredentialsIkev2] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kServerCredentialsIkev2, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kServerCredentialsIkev2);
 }
 
 void ApiResourcesManager::onPortMapAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setPortMap(jsonData);
         checkForReadyLogin();
     }
-    lastUpdateTimeMs_[RequestType::kPortMap] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kPortMap, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kPortMap);
 }
 
 void ApiResourcesManager::onNotificationsAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setNotifications(jsonData);
         if (isLoginOkEmitted_)
@@ -1016,25 +1054,23 @@ void ApiResourcesManager::onNotificationsAnswer(ServerApiRetCode serverApiRetCod
         else
             checkForReadyLogin();
     }
-    lastUpdateTimeMs_[RequestType::kNotifications] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kNotifications, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kNotifications);
 }
 
 void ApiResourcesManager::onCheckUpdateAnswer(ServerApiRetCode serverApiRetCode, const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         checkUpdate_ = jsonData;
         callback_->call(ApiResourcesManagerNotification::kCheckUpdate, LoginResult::kSuccess, std::string());
     }
-    lastUpdateTimeMs_[RequestType::kCheckUpdate] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kCheckUpdate, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kCheckUpdate);
 }
 
 void ApiResourcesManager::onAmneziawgUnblockParamsAnswer(ServerApiRetCode serverApiRetCode,
                                                           const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     if (serverApiRetCode == ServerApiRetCode::kSuccess) {
         persistentSettings_.setAmneziawgUnblockParams(jsonData);
         if (isLoginOkEmitted_)
@@ -1042,14 +1078,13 @@ void ApiResourcesManager::onAmneziawgUnblockParamsAnswer(ServerApiRetCode server
         else
             checkForReadyLogin();
     }
-    lastUpdateTimeMs_[RequestType::kAmneziawgUnblockParams] = { steady_clock::now(), serverApiRetCode == ServerApiRetCode::kSuccess };
+    recordRequestResult(RequestType::kAmneziawgUnblockParams, serverApiRetCode);
     requestsInProgress_.erase(RequestType::kAmneziawgUnblockParams);
 }
 
 void ApiResourcesManager::onDeleteSessionAnswer(ServerApiRetCode serverApiRetCode,
                                                  const std::string &jsonData)
 {
-    std::lock_guard locker(mutex_);
     g_logger->info("ApiResourcesManager::onDeleteSessionAnswer retCode: {}", (int)serverApiRetCode);
     callback_->call(ApiResourcesManagerNotification::kLogoutFinished, LoginResult::kSuccess, std::string());
 }
@@ -1067,15 +1102,104 @@ bool ApiResourcesManager::isTimeoutForRequest(RequestType requestType, int timeo
     if (it->second.isRequestSuccess) {
         return utils::since(it->second.updateTime).count() > timeout;
     } else {
-        return utils::since(it->second.updateTime).count() > kDelayBetweenFailedRequests;
+        return utils::since(it->second.updateTime).count() > it->second.retryDelayMs;
     }
+}
+
+void ApiResourcesManager::recordRequestResult(RequestType requestType, ServerApiRetCode serverApiRetCode)
+{
+    UpdateInfo &info = lastUpdateTimeMs_[requestType];
+    info.updateTime = steady_clock::now();
+    info.isRequestSuccess = (serverApiRetCode == ServerApiRetCode::kSuccess);
+
+    if (info.isRequestSuccess) {
+        info.consecutiveFailures = 0;
+        info.retryDelayMs = kFailedRequestInitialDelayMs;
+    } else if (serverApiRetCode == ServerApiRetCode::kNoNetworkConnection) {
+        // The request failed locally without reaching the API (device offline), so quick retries
+        // put no load on the backend and recovery after reconnect should be fast. The accumulated
+        // failure count is kept: it belongs to real API failures and resumes if those continue.
+        info.retryDelayMs = kFailedRequestInitialDelayMs;
+    } else {
+        info.consecutiveFailures++;
+        info.retryDelayMs = nextRetryDelayMs(info.consecutiveFailures);
+        g_logger->info("ApiResourcesManager: request type {} failed {} time(s) in a row, next retry in {} ms",
+                       (int)requestType, info.consecutiveFailures, info.retryDelayMs);
+    }
+}
+
+void ApiResourcesManager::scheduleInteractiveRetry(std::shared_ptr<boost::asio::steady_timer> &retryTimer, int &retryFailures,
+                                                   const char *logTag, std::function<void()> reissue)
+{
+    retryFailures++;
+    const int delayMs = nextRetryDelayMs(retryFailures, kInteractiveRetryMaxDelayMs);
+    g_logger->info("ApiResourcesManager::{}: network error, retry #{} in {} ms", logTag, retryFailures, delayMs);
+    retryTimer = std::make_shared<boost::asio::steady_timer>(io_context_);
+    retryTimer->expires_after(std::chrono::milliseconds(delayMs));
+    // &retryTimer refers to a member of *this, so it stays valid for as long as `this` -- the
+    // same lifetime guarded() already relies on.
+    retryTimer->async_wait(guarded([this, &retryTimer, timer = retryTimer, reissue = std::move(reissue)](const boost::system::error_code &ec) {
+        if (ec || timer != retryTimer)
+            return;
+        retryTimer.reset();
+        reissue();
+    }));
+}
+
+void ApiResourcesManager::cancelPendingLoginRetry()
+{
+    // Resetting the member is what actually supersedes the retry: a handler already dequeued when
+    // cancel() ran sees the mismatch and drops itself.
+    if (loginRetryTimer_) {
+        loginRetryTimer_->cancel();
+        loginRetryTimer_.reset();
+    }
+}
+
+void ApiResourcesManager::cancelPendingAuthTokenRetry()
+{
+    if (authTokenRetryTimer_) {
+        authTokenRetryTimer_->cancel();
+        authTokenRetryTimer_.reset();
+    }
+}
+
+int ApiResourcesManager::nextRetryDelayMs(int consecutiveFailures, int maxDelayMs)
+{
+    // 1s, 2s, 4s, ... doubling up to maxDelayMs. The shift is clamped so the 64-bit
+    // intermediate cannot overflow no matter how long the outage lasts.
+    std::int64_t delay = static_cast<std::int64_t>(kFailedRequestInitialDelayMs)
+                         << std::min(consecutiveFailures - 1, 30);
+    delay = std::min<std::int64_t>(delay, maxDelayMs);
+    // Uniform jitter in [delay/2, delay] spreads clients out instead of letting them retry in
+    // lockstep after a backend outage, while keeping the configured cap a hard upper bound.
+    std::uniform_int_distribution<int> dist(static_cast<int>(delay / 2), static_cast<int>(delay));
+    return dist(backoffRndGen_);
 }
 
 void ApiResourcesManager::clearValues()
 {
     g_logger->info("ApiResourcesManager::clearValues");
+    // A dropped answer never erases its own entry, so clear them here or the next login trips the "called
+    // twice" check. Cancelled on the io thread, not here: cancel() takes the callback's mutex while an
+    // in-flight call holds it and waits for ours, so cancelling under mutex_ would deadlock.
+    if (!requestsInProgress_.empty()) {
+        std::vector<std::shared_ptr<WSNetCancelableCallback>> abandoned;
+        for (const auto &it : requestsInProgress_)
+            abandoned.push_back(it.second);
+        // Captures the handles only, so it stays valid even if this object is destroyed first.
+        boost::asio::post(io_context_, [abandoned] {
+            for (const auto &cb : abandoned)
+                cb->cancel();
+        });
+        requestsInProgress_.clear();
+    }
     isFetchingServerCredentials_ = false;
     isLoginOkEmitted_            = false;
+    loginRetryFailures_          = 0;
+    authTokenRetryFailures_      = 0;
+    cancelPendingLoginRetry();
+    cancelPendingAuthTokenRetry();
     sessionStatus_.reset();
     prevSessionStatus_.reset();
     serverLocations_.reset();

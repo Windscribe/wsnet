@@ -58,8 +58,6 @@ public:
                                                          const std::string &osVersion, const std::string &osBuild,
                                                          WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> debugLog(const std::string &username, const std::string &strLog, WSNetRequestFinishedCallback callback) override;
-    std::shared_ptr<WSNetCancelableCallback> speedRating(const std::string &authHash, const std::string &hostname, const std::string &ip,
-                                                                 std::int32_t rating, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> staticIps(const std::string &authHash, std::uint32_t version, WSNetRequestFinishedCallback callback) override;
 
     std::shared_ptr<WSNetCancelableCallback> pingTest(std::uint32_t timeoutMs, WSNetRequestFinishedCallback callback) override;

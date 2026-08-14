@@ -117,7 +117,11 @@ void WSNetUtils_impl::onHttpFinished(std::uint64_t id, std::shared_ptr<WSNetRequ
         pending->request->callCallback();
         return;
     }
-    if (!error->isSuccess()) {
+    // Same rule as in ServerAPI_impl: CURLE_OK only means the bytes arrived. This entry point is
+    // a diagnostic (myIP through one chosen failover), and reporting an error page as a success
+    // with a garbage "IP" in it would make the diagnostic lie.
+    if (!error->isSuccess()
+        || serverapi_utils::verdictForHttpStatus(error->httpResponseCode()) != serverapi_utils::HttpStatusVerdict::kUsable) {
         pending->request->setRetCode(ServerApiRetCode::kNetworkError);
         pending->request->callCallback();
         return;

@@ -399,7 +399,27 @@ void ServerAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         return;
     }
 
+    // A completed transport says nothing about what the server actually answered: error->isSuccess()
+    // is only CURLE_OK. Without this check a 4xx/5xx whose body happened to parse as our JSON
+    // envelope was reported as kSuccess, so the caller stamped the fetch as done (ApiResourcesManager
+    // would not come back for another 24 hours) and cached the error page as the resource.
+    auto httpVerdict = serverapi_utils::HttpStatusVerdict::kUsable;
     if (error->isSuccess()) {
+        httpVerdict = serverapi_utils::verdictForHttpStatus(error->httpResponseCode());
+        // Only requests routed through a failover feed the doubt window: escalation replaces the
+        // failover route, and a request sent in the connected-VPN state goes straight to the
+        // primary domain -- there is no route to replace, so escalating would only produce a
+        // misleading "route is broken" log while the answer stays kNetworkError either way.
+        if (httpVerdict == serverapi_utils::HttpStatusVerdict::kApiUnavailable
+            && it->second.bFromDisconnectedVPNState_
+            && apiUnavailableWindow_.addAndCheckElapsed(std::chrono::steady_clock::now())) {
+            g_logger->info("API request {}: the current failover has answered nothing but HTTP errors (last one {}) for over {} minutes, treating the route as broken",
+                           it->second.request->name(), error->httpResponseCode(), kApiUnavailableDoubtWindow.count());
+            httpVerdict = serverapi_utils::HttpStatusVerdict::kRouteBroken;
+        }
+    }
+
+    if (error->isSuccess() && httpVerdict == serverapi_utils::HttpStatusVerdict::kUsable) {
         if (advancedParameters_->isLogApiResponce()) {
             g_logger->info("API request {} finished", it->second.request->name());
             g_logger->info("{}", data);
@@ -408,6 +428,9 @@ void ServerAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         // handle() may cause the retcode to change.  Only call callback here if it's still successful.
         if (it->second.request->retCode() == ServerApiRetCode::kSuccess) {
             bWasSuccesfullRequest_ = true;
+            // The route is serving the API again, so a later 429/5xx starts a fresh doubt window
+            // instead of inheriting the age of an outage this request just proved to be over.
+            apiUnavailableWindow_.reset();
             // The failover served a successful request; it is now confirmed and a later
             // transient DNS error on it should no longer force a full re-probe.
             currentFailoverUnconfirmed_ = false;
@@ -435,10 +458,23 @@ void ServerAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         setErrorCodeAndEmitRequestFinished(it->second.request.get(), ServerApiRetCode::kNoNetworkConnection);
         activeHttpRequests_.erase(it);
         return;
+    } else if (httpVerdict == serverapi_utils::HttpStatusVerdict::kApiUnavailable) {
+        // This route did reach our API -- it just will not serve the request right now (429/5xx).
+        // Report kNetworkError so the caller's exponential backoff paces the retries, and keep the
+        // current failover: re-probing every failover on each such answer multiplies API load
+        // during an outage (the very amplification the retry backoff was introduced to stop) and
+        // would push perfectly good routes into failedFailovers_. A route that never recovers is
+        // still replaced -- see the doubt window above.
+        g_logger->info("API request {} failed with HTTP status {}", it->second.request->name(), error->httpResponseCode());
+        setErrorCodeAndEmitRequestFinished(it->second.request.get(), ServerApiRetCode::kNetworkError);
+        activeHttpRequests_.erase(it);
+        return;
     }
 
-    // Either error->isSuccess() is false or the retcode was changed to kIncorrectJson by handle().
-    g_logger->info("API request {} failed with error = {}", it->second.request->name(), error->toString());
+    // error->isSuccess() is false, or the status says this route is not serving our API, or the
+    // retcode was changed to kIncorrectJson by handle().
+    g_logger->info("API request {} failed with error = {}, http status = {}", it->second.request->name(),
+                   error->toString(), error->httpResponseCode());
 
     // We need to start going through the backup domains again (via the parallel probe).
     // A DNS resolve error normally does NOT trigger this -- on an already-confirmed failover
@@ -503,6 +539,8 @@ void ServerAPI_impl::resetFailoverImpl(bool fullReset)
     failoverState_ = FailoverState::kUnknown;
     failoverData_.reset();
     currentFailoverUnconfirmed_ = false;
+    // The doubt window is a property of the route we are about to leave, not of the API.
+    apiUnavailableWindow_.reset();
     persistentSettings_.setFailoverId("");
 
     // Drop any stale probe-cache state and pending expiry refresh; after a reset we no
