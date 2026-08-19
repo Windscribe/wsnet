@@ -1,3 +1,4 @@
 *.user
 generated
 build/
+.DS_Store

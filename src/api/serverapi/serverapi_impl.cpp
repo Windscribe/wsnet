@@ -400,26 +400,35 @@ void ServerAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
     }
 
     // A completed transport says nothing about what the server actually answered: error->isSuccess()
-    // is only CURLE_OK. Without this check a 4xx/5xx whose body happened to parse as our JSON
-    // envelope was reported as kSuccess, so the caller stamped the fetch as done (ApiResourcesManager
-    // would not come back for another 24 hours) and cached the error page as the resource.
-    auto httpVerdict = serverapi_utils::HttpStatusVerdict::kUsable;
-    if (error->isSuccess()) {
-        httpVerdict = serverapi_utils::verdictForHttpStatus(error->httpResponseCode());
-        // Only requests routed through a failover feed the doubt window: escalation replaces the
-        // failover route, and a request sent in the connected-VPN state goes straight to the
-        // primary domain -- there is no route to replace, so escalating would only produce a
-        // misleading "route is broken" log while the answer stays kNetworkError either way.
-        if (httpVerdict == serverapi_utils::HttpStatusVerdict::kApiUnavailable
-            && it->second.bFromDisconnectedVPNState_
-            && apiUnavailableWindow_.addAndCheckElapsed(std::chrono::steady_clock::now())) {
-            g_logger->info("API request {}: the current failover has answered nothing but HTTP errors (last one {}) for over {} minutes, treating the route as broken",
-                           it->second.request->name(), error->httpResponseCode(), kApiUnavailableDoubtWindow.count());
-            httpVerdict = serverapi_utils::HttpStatusVerdict::kRouteBroken;
-        }
+    // is only CURLE_OK. Of what did arrive, only a 5xx can be judged from the status alone; for
+    // every other status the body decides, in handle() below, so a non-2xx that carries our JSON
+    // envelope (a failed captcha answers 403) stays a valid answer while a middlebox error page
+    // becomes kIncorrectJson whatever status it came with.
+    bool isApiUnavailable = error->isSuccess() && serverapi_utils::isApiUnavailableStatus(error->httpResponseCode());
+    bool isRouteBroken = false;
+
+    // Only requests routed through a failover feed the doubt window: escalation replaces the
+    // failover route, and a request sent in the connected-VPN state goes straight to the
+    // primary domain -- there is no route to replace, so escalating would only produce a
+    // misleading "route is broken" log while the answer stays kNetworkError either way.
+    if (isApiUnavailable && it->second.bFromDisconnectedVPNState_
+        && apiUnavailableWindow_.addAndCheckElapsed(std::chrono::steady_clock::now())) {
+        g_logger->info("API request {}: the current failover has answered nothing but HTTP errors (last one {}) for over {} minutes, treating the route as broken",
+                       it->second.request->name(), error->httpResponseCode(), kApiUnavailableDoubtWindow.count());
+        isApiUnavailable = false;
+        isRouteBroken = true;
     }
 
-    if (error->isSuccess() && httpVerdict == serverapi_utils::HttpStatusVerdict::kUsable) {
+    // A request that skips the JSON check (ServerConfigs answers with a raw OpenVPN config) has
+    // nothing in handle() that could tell our answer from a middlebox error page, so for those
+    // the status is the only signal left -- without this a 4xx page would be stamped as a fetched
+    // resource and cached for the next 24 hours.
+    if (error->isSuccess() && !isApiUnavailable && it->second.request->isIgnoreJsonParse()
+        && (error->httpResponseCode() < 200 || error->httpResponseCode() >= 300)) {
+        isRouteBroken = true;
+    }
+
+    if (error->isSuccess() && !isApiUnavailable && !isRouteBroken) {
         if (advancedParameters_->isLogApiResponce()) {
             g_logger->info("API request {} finished", it->second.request->name());
             g_logger->info("{}", data);
@@ -428,7 +437,7 @@ void ServerAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         // handle() may cause the retcode to change.  Only call callback here if it's still successful.
         if (it->second.request->retCode() == ServerApiRetCode::kSuccess) {
             bWasSuccesfullRequest_ = true;
-            // The route is serving the API again, so a later 429/5xx starts a fresh doubt window
+            // The route is serving the API again, so a later 5xx starts a fresh doubt window
             // instead of inheriting the age of an outage this request just proved to be over.
             apiUnavailableWindow_.reset();
             // The failover served a successful request; it is now confirmed and a later
@@ -458,8 +467,8 @@ void ServerAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         setErrorCodeAndEmitRequestFinished(it->second.request.get(), ServerApiRetCode::kNoNetworkConnection);
         activeHttpRequests_.erase(it);
         return;
-    } else if (httpVerdict == serverapi_utils::HttpStatusVerdict::kApiUnavailable) {
-        // This route did reach our API -- it just will not serve the request right now (429/5xx).
+    } else if (isApiUnavailable) {
+        // This route did reach our API -- it just will not serve the request right now (5xx).
         // Report kNetworkError so the caller's exponential backoff paces the retries, and keep the
         // current failover: re-probing every failover on each such answer multiplies API load
         // during an outage (the very amplification the retry backoff was introduced to stop) and
@@ -471,8 +480,8 @@ void ServerAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         return;
     }
 
-    // error->isSuccess() is false, or the status says this route is not serving our API, or the
-    // retcode was changed to kIncorrectJson by handle().
+    // error->isSuccess() is false, or the route lost the benefit of the doubt, or the answer did
+    // not carry our JSON (handle() changed the retcode to kIncorrectJson).
     g_logger->info("API request {} failed with error = {}, http status = {}", it->second.request->name(),
                    error->toString(), error->httpResponseCode());
 

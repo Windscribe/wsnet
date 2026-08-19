@@ -289,13 +289,12 @@ void FailoverProbeExecutor::onProbeFinished(std::uint64_t probeId, std::uint32_t
         return;
     }
 
-    // A probe must not accept an error page as proof that the route works: any non-2xx means
-    // something other than our API answered for this domain (or our API refused to), and a body
-    // that happens to look like our JSON envelope would otherwise let such a route win the probe
-    // and then fail every real request sent through it.
+    // A probe must not accept an error page as proof that the route works: what proves it is the
+    // myIP request's own JSON check below, which an error page from a fronting CDN or a middlebox
+    // fails whatever status it carries. A 5xx is the exception -- it says nothing about the route,
+    // so a probe must not conclude anything from it either.
     const bool isUsableHttpStatus =
-        error->isSuccess()
-        && serverapi_utils::verdictForHttpStatus(error->httpResponseCode()) == serverapi_utils::HttpStatusVerdict::kUsable;
+        error->isSuccess() && !serverapi_utils::isApiUnavailableStatus(error->httpResponseCode());
 
     bool success = false;
     if (isUsableHttpStatus) {

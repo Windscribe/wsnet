@@ -99,7 +99,7 @@ private:
 
     std::optional<FailoverData> failoverData_;      // valid only in kReady state
 
-    // How long the current failover keeps the benefit of the doubt while it answers 429/5xx
+    // How long the current failover keeps the benefit of the doubt while it answers 5xx
     // (see ApiUnavailableWindow). Sized so that a client rides out a backend outage on the
     // route it already has, but a route that is broken rather than busy is replaced within
     // minutes. It is compared against the retry cadence of the callers, whose backoff caps at

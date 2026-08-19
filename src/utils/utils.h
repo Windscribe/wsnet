@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <chrono>
 #include <iostream>
 #include <vector>
@@ -75,10 +76,22 @@ inline std::string leftSubStr(const std::string &s, int n)
 
 // find the top domain from the domain name
 // for example: api.windscribe.com -> windscribe.com
+// IP literals are returned unchanged
 inline std::string topDomain(const std::string &domain)
 {
     if (domain.empty())
         return std::string();
+
+    // A URL host that is an IPv6 literal is serialized as [2001:db8::1], but curl logs the
+    // address without brackets, so unwrap it to get a needle that matches both forms.
+    if (domain.size() > 2 && domain.front() == '[' && domain.back() == ']') {
+        std::string inner = domain.substr(1, domain.size() - 2);
+        if (isIpv6Address(inner))
+            return inner;
+    }
+
+    if (isIpAddress(domain) || isIpv6Address(domain))
+        return domain;
 
     bool bFirstDotFound = false;
     for (size_t i = domain.size()-1; i > 0; --i) {
@@ -91,6 +104,36 @@ inline std::string topDomain(const std::string &domain)
         }
     }
     return domain;
+}
+
+// Replace all literal occurrences of `from` that are not adjacent to alphanumeric characters.
+inline std::string replaceAllLiteral(const std::string &src, const std::string &from, const std::string &to)
+{
+    if (from.empty() || src.empty())
+        return src;
+
+    std::string result;
+    result.reserve(src.size());
+    size_t pos = 0;
+    while (pos < src.size()) {
+        size_t found = src.find(from, pos);
+        if (found == std::string::npos) {
+            result.append(src, pos, std::string::npos);
+            break;
+        }
+        bool leftOk = (found == 0) || !std::isalnum(static_cast<unsigned char>(src[found - 1]));
+        size_t after = found + from.size();
+        bool rightOk = (after >= src.size()) || !std::isalnum(static_cast<unsigned char>(src[after]));
+        if (leftOk && rightOk) {
+            result.append(src, pos, found - pos);
+            result.append(to);
+            pos = after;
+        } else {
+            result.append(src, pos, found - pos + 1);
+            pos = found + 1;
+        }
+    }
+    return result;
 }
 
 // generate random integer in [min, max]

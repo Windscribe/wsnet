@@ -48,21 +48,9 @@ std::shared_ptr<WSNetHttpRequest> serverapi_utils::createHttpRequestWithFailover
     return httpRequest;
 }
 
-serverapi_utils::HttpStatusVerdict serverapi_utils::verdictForHttpStatus(int httpStatusCode)
+bool serverapi_utils::isApiUnavailableStatus(int httpStatusCode)
 {
-    // The whole 2xx range, not a strict 200: assets and non-JSON endpoints may legitimately
-    // answer 204/206, and treating those as an error would break requests that work today.
-    if (httpStatusCode >= 200 && httpStatusCode < 300)
-        return HttpStatusVerdict::kUsable;
-
-    // The only statuses a retry can plausibly fix. Everything else (a redirect we do not
-    // follow, 400/401/403/404, or a response with no status line at all) will answer exactly
-    // the same on the next attempt, so retrying the same route is pointless -- and 403/404 is
-    // the usual signature of a fronting CDN or middlebox rather than of our API.
-    if (httpStatusCode == 429 || (httpStatusCode >= 500 && httpStatusCode < 600))
-        return HttpStatusVerdict::kApiUnavailable;
-
-    return HttpStatusVerdict::kRouteBroken;
+    return httpStatusCode >= 500 && httpStatusCode < 600;
 }
 
 

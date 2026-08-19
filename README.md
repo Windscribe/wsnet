@@ -2,7 +2,7 @@
 
 # Motivation
 
-The server API can be accessed by several dozen anti-censorship bypass methods. Implementation and debugging all of these methods for each platform is rather laborious and difficult to test. So the library hides all these details and provides clients with a single and simple interface. Further modification of the server API access methods will only require changes to the library code.  Also the library uses libraries like curl and openssl modified by ECH patches + our own to bypass censorship. Some such methods may be difficult or unrealizable to implement separately for Android/iOS platforms.
+The server API can be accessed by several dozen anti-censorship bypass methods. Implementing and debugging all of these methods for each platform is rather laborious and difficult to test. So the library hides all these details and provides clients with a single and simple interface. Further modification of the server API access methods will only require changes to the library code.  Also the library uses libraries like curl and openssl modified by ECH patches + our own to bypass censorship. Some such methods may be difficult or unrealizable to implement separately for Android/iOS platforms.
 
 # Features
 * Support for any architecture (x64, arm64 and so on) and platforms (Windows/Mac/Linux/Android/iOS).

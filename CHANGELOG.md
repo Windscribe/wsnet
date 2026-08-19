@@ -1,3 +1,10 @@
+1.5.32 (18/08/2026)
+All:
+   * Scoped retries, backoff and failover to invalid JSON, timeouts and 5xx responses. A non-2xx response carrying the API's JSON envelope (`errorCode` and/or `data`) -- a failed captcha answers HTTP 403, a throttled caller HTTP 429 -- is now delivered to the app as a valid answer instead of being retried or replacing the failover route. Requests that do not return JSON (ServerConfigs) still require a 2xx.
+   * Fixed curl debug log redaction treating domains and IPs as regex, which injected MD5 hashes into timeout values and other numbers when the host was an IP literal.
+   * Fixed IPv6-literal hosts leaking into curl debug logs. A URL host is serialized as [2001:db8::1] while curl logs the bare address, so the redaction never matched it.
+
+
 1.5.31 (12/08/2026)
 All:
    * Replaced ApiResourcesManager's fixed 1-second failed-request retry delay with bounded per-resource exponential backoff (1s doubling to a 5-minute cap, with jitter), so clients no longer retry large resources such as /Inventory/servers and /Inventory/locations at a fixed 1 Hz rate during API outages. Offline answers keep the quick fixed retry since they never reach the API.

@@ -45,6 +45,7 @@ public:
     std::string bearerToken() const { return bearerToken_; }
 
     void setIgnoreJsonParse() { isIgnoreJsonParse_ = true; }
+    bool isIgnoreJsonParse() const { return isIgnoreJsonParse_; }
 
     virtual std::string postData() const;
     std::string name() const { return name_; }

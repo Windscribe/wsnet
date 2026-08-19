@@ -1,5 +1,4 @@
 #include "curlnetworkmanager.h"
-#include <regex>
 #include <cmrc/cmrc.hpp>
 #include "utils/wsnet_logger.h"
 #include "utils/utils.h"
@@ -313,15 +312,12 @@ int CurlNetworkManager::curlTrace(CURL *handle, curl_infotype type, char *data, 
     RequestInfo *requestInfo = static_cast<RequestInfo *>(clientp);
 
     if (type == CURLINFO_TEXT) {
-        // replace all domains in the string with their md5 for privacy.
-        std::string src = std::string(data, size);
-        std::regex reg(requestInfo->domain);
-        std::string res = regex_replace(src, reg, requestInfo->domainMd5);
-
-        // replace all IPv4 addresses in the string with their md5 for privacy.
+        // replace domains/IPs with their md5 for privacy. The match must be literal: treating
+        // the domain as a regex made '.' a wildcard, which corrupted unrelated numbers in the log.
+        std::string res = std::string(data, size);
+        res = utils::replaceAllLiteral(res, requestInfo->domain, requestInfo->domainMd5);
         for (size_t i = 0; i < requestInfo->ips.size(); ++i) {
-            std::regex reg(requestInfo->ips[i]);
-            res = regex_replace(res, reg, requestInfo->ipsMd5[i]);
+            res = utils::replaceAllLiteral(res, requestInfo->ips[i], requestInfo->ipsMd5[i]);
         }
 
         requestInfo->debugLogs.push_back(res);

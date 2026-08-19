@@ -12,23 +12,15 @@ namespace serverapi_utils {
     std::shared_ptr<WSNetHttpRequest> createHttpRequestWithFailoverParameters(WSNetHttpNetworkManager *httpNetworkManager, const FailoverData &failoverData, BaseRequest *request,
                                                                           bool bIgnoreSslErrors, bool isAPIExtraTLSPadding);
 
-    // How a response that completed at the transport level must be treated.
-    // WSNetRequestError::isSuccess() only reports the curl code, i.e. that the bytes arrived;
-    // the HTTP status is what says whether those bytes are an answer from our API.
-    enum class HttpStatusVerdict {
-        // 2xx: the body is the API's answer, hand it to BaseRequest::handle().
-        kUsable,
-        // 429 or 5xx: our API was reached over this route but will not serve the request right
-        // now. Retriable on the same route, paced by the caller's exponential backoff.
-        kApiUnavailable,
-        // Anything else -- 3xx (we deliberately do not follow redirects), 4xx, or no status at
-        // all: whatever answered is not serving our API here. Typical sources are a fronting
-        // CDN that does not know our Host, a captive portal or a censoring middlebox, so the
-        // route has to be replaced rather than retried.
-        kRouteBroken
-    };
-
-    HttpStatusVerdict verdictForHttpStatus(int httpStatusCode);
+    // The one thing the HTTP status alone can decide about a response that arrived: a 5xx means
+    // our API (or whatever fronts it) is there but will not serve this request right now, which
+    // is retriable on the same route and must not be handed to BaseRequest::handle() as an answer.
+    //
+    // Every other status is passed on to handle(), where the JSON envelope decides. A non-2xx is
+    // not a failure by itself -- a failed captcha comes back as 403 and a throttled caller as 429,
+    // both with a perfectly valid body -- while a middlebox error page fails the envelope check on
+    // any status and ends up as kIncorrectJson, which is what replaces the route.
+    bool isApiUnavailableStatus(int httpStatusCode);
 
     // 502/503/504 can come just as well from an overloaded backend of ours as from a fronting
     // CDN whose backend mapping broke, and nothing in the response tells the two apart. We
