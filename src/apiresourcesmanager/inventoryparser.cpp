@@ -49,6 +49,7 @@ InventoryServer parseServerObj(const rapidjson::Value &obj, bool &ok)
     srv.weight  = obj["weight"].GetInt();
     srv.netLoad = obj["net_load"].GetInt();
     srv.sClass  = obj.HasMember("s_class") && obj["s_class"].IsInt() ? obj["s_class"].GetInt() : 0;
+    srv.forceDisconnect = obj.HasMember("fd") && obj["fd"].IsInt() && obj["fd"].GetInt() == 1;
 
     ok = true;
     return srv;
@@ -233,6 +234,8 @@ std::string InventoryParser::serializeServers(const std::map<int, InventoryServe
         obj.AddMember("weight",   srv.weight,                        alloc);
         obj.AddMember("net_load", srv.netLoad,                       alloc);
         obj.AddMember("s_class",  srv.sClass,                        alloc);
+        if (srv.forceDisconnect)
+            obj.AddMember("fd", 1, alloc);
         arr.PushBack(obj, alloc);
     }
     doc.AddMember("servers", arr, alloc);
@@ -416,12 +419,14 @@ void InventoryParser::fillServerLocations(WSNetServerLocations &result,
 
                 for (const auto *srv : dcServers) {
                     ServerNode node;
+                    node.id       = srv->id;
                     node.host     = srv->host;
                     node.ip       = srv->ip;
                     node.ip2      = srv->ip2;
                     node.ip3      = srv->ip3;
                     node.weight   = srv->weight;
                     node.ipv6     = srv->ipv6;
+                    node.forceDisconnect = srv->forceDisconnect;
                     group.nodes.push_back(std::move(node));
                 }
             }
@@ -492,12 +497,15 @@ void InventoryParser::fillServerLocationsJson(WSNetServerLocations &result,
 
                 for (const auto *srv : dcServers) {
                     rapidjson::Value jsonNode(rapidjson::kObjectType);
+                    jsonNode.AddMember("id",       srv->id, alloc);
                     jsonNode.AddMember("host",     rapidjson::Value(srv->host.c_str(), alloc), alloc);
                     jsonNode.AddMember("ip",       rapidjson::Value(srv->ip.c_str(), alloc), alloc);
                     jsonNode.AddMember("ip2",      rapidjson::Value(srv->ip2.c_str(), alloc), alloc);
                     jsonNode.AddMember("ip3",      rapidjson::Value(srv->ip3.c_str(), alloc), alloc);
                     jsonNode.AddMember("weight",   srv->weight, alloc);
                     jsonNode.AddMember("ipv6",     srv->ipv6, alloc);
+                    if (srv->forceDisconnect)
+                        jsonNode.AddMember("fd", 1, alloc);
                     jsonNodes.PushBack(std::move(jsonNode), alloc);
                 }
             }

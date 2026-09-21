@@ -1,3 +1,18 @@
+1.5.34.1 (03/09/2026)
+Linux:
+   * ICMP pings no longer fail under a non-English system locale. The system ping utility was launched with the user's locale, and its translated output (`tempo=` for `time=`, and `icmp_seq=` in some translations) did not match the parser, so every ICMP ping failed for users with a translated locale. Child processes now run with `LC_ALL=C.UTF-8` and without `LANGUAGE`, so their output is untranslated while non-ASCII text still survives.
+
+
+1.5.34 (27/08/2026)
+All:
+   * Exposed the server id on parsed serverlist-v2 nodes so clients can correlate server nodes with API ids.
+
+
+1.5.33 (26/08/2026)
+All:
+   * Exposed serverlist-v2 force-disconnect nodes (`fd: 1`) through inventory parsing and server locations, so clients can avoid new connections to draining nodes and evacuate existing connections. #39
+
+
 1.5.32 (18/08/2026)
 All:
    * Scoped retries, backoff and failover to invalid JSON, timeouts and 5xx responses. A non-2xx response carrying the API's JSON envelope (`errorCode` and/or `data`) -- a failed captcha answers HTTP 403, a throttled caller HTTP 429 -- is now delivered to the app as a valid answer instead of being retried or replacing the failover route. Requests that do not return JSON (ServerConfigs) still require a 2xx.

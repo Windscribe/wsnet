@@ -68,12 +68,14 @@ struct InventoryServer {
     int         weight   = 1;
     int         netLoad  = 0;
     int         sClass   = 0;
+    bool        forceDisconnect = false;
 
     bool operator==(const InventoryServer &o) const {
         return id == o.id && host == o.host && ip == o.ip &&
                ip2 == o.ip2 && ip3 == o.ip3 && ipv6 == o.ipv6 &&
                dcId == o.dcId && weight == o.weight &&
-               netLoad == o.netLoad && sClass == o.sClass;
+               netLoad == o.netLoad && sClass == o.sClass &&
+               forceDisconnect == o.forceDisconnect;
     }
 };
 

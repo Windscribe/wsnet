@@ -15,12 +15,14 @@ class InventoryParser;  // forward declaration — grants friendship without pul
 
 struct ServerNode
 {
+    int id = 0;
     std::string host;
     std::string ip;
     std::string ip2;
     std::string ip3;
     int weight = 0;
     int ipv6 = 0;
+    bool forceDisconnect = false;
 };
 
 struct ServerGroup

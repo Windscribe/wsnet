@@ -1,6 +1,10 @@
 #include "processmanager.h"
-#include "utils/wsnet_logger.h"
+
+#include <boost/process/v1/env.hpp>
+#include <boost/process/v1/environment.hpp>
 #include <sys/stat.h>
+
+#include "utils/wsnet_logger.h"
 
 namespace wsnet {
 
@@ -59,10 +63,18 @@ bool ProcessManager::execute(const std::string &cmd, const std::vector<std::stri
             return false;
         }
 
+        // ping translates its output under a non-English locale, which breaks the parser reading it. C.UTF-8
+        // rather than C so non-ASCII text survives charset conversion; LANGUAGE is unset because older glibc
+        // lets it override LC_ALL for messages.
+        boost::process::v1::environment childEnv = boost::this_process::environment();
+        childEnv["LC_ALL"] = "C.UTF-8";
+        childEnv.erase("LANGUAGE");
+
         auto childProcess = std::make_unique<ChildProcess>();
         childProcess->callback = callback;
         childProcess->process = boost::process::v1::child(exePath, args,
             boost::process::v1::std_out >  childProcess->data,
+            boost::process::v1::env = childEnv,
             io_context_,
             boost::process::v1::on_exit = [this, id = curId_](int exit, std::error_code ec) {
                 // on exit function handler

@@ -266,6 +266,7 @@ test:wsnet:rhel:
       -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
       "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
     - cmake --build build --parallel
+    - dnf install -y iputils
     - pip3 install pproxy gcovr
     - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/build:${LD_LIBRARY_PATH}"
     - set +o pipefail
