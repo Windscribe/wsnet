@@ -72,6 +72,10 @@ public:
     void setSessionToken(const std::string &token) override;
     std::string sessionToken() const override;
 
+    // kIpv4 by default
+    void setIpFamily(IpFamily ipFamily) override;
+    IpFamily ipFamily() const override;
+
 private:
     // internal implementation class (to hide include skyr/url.hpp from this header, there were compilation errors in Windows)
     struct Impl;

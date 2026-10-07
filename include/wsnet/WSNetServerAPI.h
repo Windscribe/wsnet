@@ -97,11 +97,6 @@ public:
 
     virtual std::shared_ptr<WSNetCancelableCallback> staticIps(const std::string &authHash, std::uint32_t version, WSNetRequestFinishedCallback callback) = 0;
 
-    // use this API call for connectivity tests when a VPN is connected
-    // this request is always made through the primary domain windscribe.com and also has a backup domain in case the first one returns something unexpecte.
-    // this request is intended for connectivity tests only and it does not use a failover mechanism.
-    virtual std::shared_ptr<WSNetCancelableCallback> pingTest(std::uint32_t timeoutMs, WSNetRequestFinishedCallback callback) = 0;
-
     // pcpid parameter is optional and can be empty string
     virtual std::shared_ptr<WSNetCancelableCallback> notifications(const std::string &authHash, const std::string &pcpid, WSNetRequestFinishedCallback callback) = 0;
 
@@ -120,7 +115,7 @@ public:
     virtual std::shared_ptr<WSNetCancelableCallback> wgConfigsPskRekey(const std::string &authHash, const std::string &clientPublicKey,
                                                                        WSNetRequestFinishedCallback callback) = 0;
 
-    // returns your IP address, uses a failover mechanism, so it can work in restricted networks when a VPN is disconnected unlike PingTest
+    // returns your IP address, uses a failover mechanism, so it can work in restricted networks when a VPN is disconnected
     virtual std::shared_ptr<WSNetCancelableCallback> myIP(WSNetRequestFinishedCallback callback) = 0;
 
     virtual std::shared_ptr<WSNetCancelableCallback> mobileBillingPlans(const std::string &authHash, const std::string &mobilePlanType, const std::string &promo, int version, WSNetRequestFinishedCallback callback) = 0;

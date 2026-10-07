@@ -22,6 +22,11 @@ BaseRequest *bridgeapi_requests_factory::rotateIp(const std::string &sessionToke
     return request;
 }
 
+BaseRequest *bridgeapi_requests_factory::checkIp(const std::string &sessionToken, RequestFinishedCallback callback)
+{
+    return new BridgeAPIRequest(HttpMethod::kGet, SubdomainType::kBridgeAPI, "v1/ip/check", std::map<std::string, std::string>(), sessionToken, callback);
+}
+
 BaseRequest *bridgeapi_requests_factory::fetchToken(const std::string &sessionToken, RequestFinishedCallback callback)
 {
     return new BridgeTokenRequest(sessionToken, callback);

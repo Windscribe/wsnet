@@ -8,6 +8,7 @@ namespace bridgeapi_requests_factory
 {
     BaseRequest *pinIp(const std::string &sessionToken, const std::string &ip, RequestFinishedCallback callback);
     BaseRequest *rotateIp(const std::string &sessionToken, RequestFinishedCallback callback);
+    BaseRequest *checkIp(const std::string &sessionToken, RequestFinishedCallback callback);
     BaseRequest *fetchToken(const std::string &sessionToken, RequestFinishedCallback callback);
 }
 

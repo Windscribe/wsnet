@@ -21,10 +21,11 @@ public:
     void setIgnoreSslErrors(bool bIgnore) override;
     bool hasSessionToken() const override;
     void setApiAvailableCallback(WSNetApiAvailableCallback callback) override;
-    void setCurrentHost(const std::string &host) override;
+    void setCurrentNodeId(std::int32_t nodeId) override;
 
     std::shared_ptr<WSNetCancelableCallback> pinIp(const std::string &ip, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> rotateIp(WSNetRequestFinishedCallback callback) override;
+    std::shared_ptr<WSNetCancelableCallback> checkIp(WSNetRequestFinishedCallback callback) override;
 
 private:
     std::unique_ptr<BridgeAPI_impl> impl_;

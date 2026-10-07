@@ -19,6 +19,7 @@
 #include "emergencyconnect/emergencyconnect.h"
 #include "pingmanager/pingmanager.h"
 #include "decoytraffic/decoytraffic.h"
+#include "tunneltest/tunneltest.h"
 #include "advancedparameters.h"
 #include "connectstate.h"
 #include "wsnet_version.h"
@@ -108,6 +109,7 @@ public:
         connectState_ = std::make_shared<ConnectState>();
         bridgeAPI_ = std::make_shared<BridgeAPI>(io_context_, httpNetworkManager_.get(), *persistentSettings_, advancedParameters_.get(), connectState_);
         serverAPI_ = std::make_shared<ServerAPI>(io_context_, httpNetworkManager_.get(), failoverContainer_.get(), *persistentSettings_, advancedParameters_.get(), connectState_);
+        tunnelTest_ = std::make_shared<TunnelTest>(io_context_, dnsResolver_.get(), bridgeAPI_.get(), httpNetworkManager_.get());
         apiResourcesManager_ = std::make_shared<ApiResourcesManager>(io_context_, serverAPI_.get(), *persistentSettings_, connectState_);
         emergencyConnect_ = std::make_shared<EmergencyConnect>(io_context_, failoverContainer_.get(), dnsResolver_.get());
         pingManager_ = std::make_shared<PingManager>(io_context_, httpNetworkManager_.get(), advancedParameters_.get(), connectState_);
@@ -144,6 +146,7 @@ public:
     std::shared_ptr<WSNetHttpNetworkManager> httpNetworkManager() override { return httpNetworkManager_; }
     std::shared_ptr<WSNetBridgeAPI> bridgeAPI() override { return bridgeAPI_; }
     std::shared_ptr<WSNetServerAPI> serverAPI() override { return serverAPI_; }
+    std::shared_ptr<WSNetTunnelTest> tunnelTest() override { return tunnelTest_; }
     std::shared_ptr<WSNetApiResourcesManager> apiResourcersManager() override { return apiResourcesManager_; }
     std::shared_ptr<WSNetEmergencyConnect> emergencyConnect() override { return emergencyConnect_; };
     std::shared_ptr<WSNetPingManager> pingManager() override { return pingManager_; }
@@ -166,6 +169,7 @@ private:
     std::shared_ptr<WSNetAdvancedParameters> advancedParameters_;
     std::shared_ptr<BridgeAPI> bridgeAPI_;
     std::shared_ptr<ServerAPI> serverAPI_;
+    std::shared_ptr<TunnelTest> tunnelTest_;
     std::shared_ptr<WSNetApiResourcesManager> apiResourcesManager_;
     std::shared_ptr<EmergencyConnect> emergencyConnect_;
     std::shared_ptr<PingManager> pingManager_;

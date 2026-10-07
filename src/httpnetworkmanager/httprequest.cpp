@@ -23,6 +23,7 @@ struct HttpRequest::Impl
     bool isEnableFreshConnect = true;
     skyr::url skyrUrl;
     std::string sessionToken;
+    IpFamily ipFamily = IpFamily::kIpv4;
 };
 
 HttpRequest::HttpRequest(const std::string &url, std::uint32_t timeoutMs, HttpMethod httpMethod, bool isIgnoreSslErrors, const std::string &postData)
@@ -208,6 +209,16 @@ void HttpRequest::setSessionToken(const std::string &token)
 std::string HttpRequest::sessionToken() const
 {
     return pImpl_->sessionToken;
+}
+
+void HttpRequest::setIpFamily(IpFamily ipFamily)
+{
+    pImpl_->ipFamily = ipFamily;
+}
+
+IpFamily HttpRequest::ipFamily() const
+{
+    return pImpl_->ipFamily;
 }
 
 } // namespace wsnet

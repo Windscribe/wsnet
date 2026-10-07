@@ -148,6 +148,8 @@ if (APPLE)
 endif()
 
 target_link_libraries(wsnet PRIVATE c-ares::cares CURL::libcurl spdlog::spdlog rapidjson skyr::skyr-url OpenSSL::SSL wsnet::rc Boost::filesystem ${OS_SPECIFIC_LIBRARIES})
+# skyr-url 1.x includes range-v3 headers that range-v3 has since deprecated
+target_compile_definitions(wsnet PRIVATE RANGES_DISABLE_DEPRECATED_WARNINGS)
 target_include_directories(wsnet PRIVATE
     ${PROJECT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include/wsnet ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CPP_BASE64_INCLUDE_DIRS} ${ADVOBFUSCATOR_INCLUDE_DIRS}

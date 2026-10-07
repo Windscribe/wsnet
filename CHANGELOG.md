@@ -1,6 +1,27 @@
-1.5.34.1 (03/09/2026)
+1.5.38 (05/10/2026)
+   * Updated ws-vcpkg-registry baseline to pick up OpenSSL 4.0.3 port.
+
+
+1.5.37 (25/09/2026)
+All:
+   * Added `WSNetBridgeAPI::checkIp`, a GET of the node's `v1/ip/check` that answers with the tunnel's own exit addresses as `{"ipv4":"...","ipv6":"..."}`, an unavailable family omitted. It is signed with the same session token as the other bridge calls and is not queued behind one: a node that cannot mint a token (non-pro), a token it no longer honours (403) and an assignment it cannot report (503) all come back as a failure so the caller falls back to another source, rather than the tunnel being torn down and rebuilt just to learn an IP. Note that a bridge request suppressed by advanced parameters is completed locally with an empty body and `kSuccess`, so the address must be read out of the payload rather than inferred from the return code.
+   * Added `WSNetTunnelTest` (`WSNet::tunnelTest()`), which checks that a freshly established tunnel carries traffic and reports its exit IPs through `start(isBridgeAllowed, callback)` as `(isSuccess, ipv4, ipv6)`. One run fits in ~14 s. The tunnel-test hostname must resolve through the system resolver first. After that the node's `checkIp` is preferred, with ~6 s for it and retries on transport errors. Otherwise the exit IP is fetched over HTTPS, with IPv4 deciding the result and IPv6 filled in only if it answers within ~0.5 s of IPv4. Pass `isBridgeAllowed = false` for a tunnel that does not end on a Windscribe node (a custom config). The schedule is the same for every protocol: a protocol that needs time to settle after connecting (OpenVPN) must be waited out by the caller before `start()`. Cancel the returned callback as soon as the tunnel goes down, since a result that arrives later describes a tunnel that no longer exists.
+   * Breaking API change: `WSNetServerAPI::pingTest` is removed. Use `WSNetTunnelTest` instead.
+   * Breaking API change: added `WSNetHttpRequest::setIpFamily` / `ipFamily` (`kIpv4` by default). DNS is queried only for that family and the request connects only over it.
+   * Bridge API requests (`pinIp`, `rotateIp`, `checkIp`) that fail at the transport level, without reaching the node, now return `kNetworkError` instead of `kBridgeApiError`, so they can be told apart from an error the node actually returned and retried. `kBridgeApiError` now means only an answer from the node.
+   * The primary tunnel-test endpoint is now `checkip.windscribe.net` instead of `checkip.windscribe.com`.
+
+
+1.5.36 (03/09/2026)
 Linux:
    * ICMP pings no longer fail under a non-English system locale. The system ping utility was launched with the user's locale, and its translated output (`tempo=` for `time=`, and `icmp_seq=` in some translations) did not match the parser, so every ICMP ping failed for users with a translated locale. Child processes now run with `LC_ALL=C.UTF-8` and without `LANGUAGE`, so their output is untranslated while non-ASCII text still survives.
+
+
+1.5.35 (01/09/2026)
+All:
+   * Bridge API session tokens are now keyed by server node id instead of the node's hostname. A token lives in the issuing node's own store, scoped to the tunnel source IP, and no other node honours it; a hostname stopped naming one node once every server in a datacenter could answer to a single protocol-level record, so the cache would have offered one node's token to another. Breaking API change: `WSNetBridgeAPI::setCurrentHost(host)` is replaced by `setCurrentNodeId(nodeId)`, with 0 meaning "no API node" (a custom config), whose token is now kept for the live connection only instead of being persisted in a bucket every other nodeless connection read back. Tokens persisted under the old hostname keys are dropped on load.
+   * A reply that arrives after the tunnel it was sent on has gone is no longer applied to the connection that replaced it. Requests now carry the connection they were issued under, so a token answering for a node we have already left is discarded instead of being stored under the current node's id and used to sign its requests -- the cross-node mix-up the node-id keying exists to prevent, reachable through a reconnect that beat a 5-second request timeout.
+   * A queued pinIp request is no longer failed while the token retry it is waiting on is still in flight. A node that rejects the token we present makes the client ask for a fresh one, which usually succeeds -- but the pin was being answered with kNoToken a moment before that landed, surfacing as a failed IP pin on a connection that was about to work.
 
 
 1.5.34 (27/08/2026)

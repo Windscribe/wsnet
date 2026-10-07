@@ -46,9 +46,9 @@ void HttpNetworkManager_impl::executeRequest(const std::shared_ptr<WSNetHttpRequ
         DnsCacheResult result;
         // take into account that a SNI domain can be specified
         if (!request->sniDomain().empty()) {
-            result = dnsCache_.resolve(curRequestId_, request->sniDomain(), !request->isUseDnsCache());
+            result = dnsCache_.resolve(curRequestId_, request->sniDomain(), request->ipFamily(), !request->isUseDnsCache());
         } else {
-            result = dnsCache_.resolve(curRequestId_, request->hostname(), !request->isUseDnsCache());
+            result = dnsCache_.resolve(curRequestId_, request->hostname(), request->ipFamily(), !request->isUseDnsCache());
         }
         if (result.bFromCache) {
             onDnsResolvedImpl(result);

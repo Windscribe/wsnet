@@ -7,7 +7,6 @@
 #include "failover/ifailovercontainer.h"
 #include "utils/persistentsettings.h"
 #include "connectstate.h"
-#include "pingtest.h"
 
 namespace wsnet {
 
@@ -60,7 +59,6 @@ public:
     std::shared_ptr<WSNetCancelableCallback> debugLog(const std::string &username, const std::string &strLog, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> staticIps(const std::string &authHash, std::uint32_t version, WSNetRequestFinishedCallback callback) override;
 
-    std::shared_ptr<WSNetCancelableCallback> pingTest(std::uint32_t timeoutMs, WSNetRequestFinishedCallback callback) override;
     std::shared_ptr<WSNetCancelableCallback> notifications(const std::string &authHash, const std::string &pcpid, WSNetRequestFinishedCallback callback) override;
 
     std::shared_ptr<WSNetCancelableCallback> getRobertFilters(const std::string &authHash, WSNetRequestFinishedCallback callback) override;
@@ -133,7 +131,6 @@ private:
     WSNetAdvancedParameters *advancedParameters_;
     std::shared_ptr<ConnectState> connectState_;
     std::uint32_t subscriberId_;
-    PingTest pingTest_;
 
     void onVPNConnectStateChanged(bool isConnected);
 };

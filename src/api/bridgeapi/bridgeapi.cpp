@@ -51,10 +51,10 @@ void BridgeAPI::setApiAvailableCallback(WSNetApiAvailableCallback callback)
     });
 }
 
-void BridgeAPI::setCurrentHost(const std::string &host)
+void BridgeAPI::setCurrentNodeId(std::int32_t nodeId)
 {
-    boost::asio::post(io_context_, [this, host] {
-        impl_->setCurrentHost(host);
+    boost::asio::post(io_context_, [this, nodeId] {
+        impl_->setCurrentNodeId(nodeId);
     });
 }
 
@@ -77,6 +77,14 @@ std::shared_ptr<WSNetCancelableCallback> BridgeAPI::rotateIp(WSNetRequestFinishe
     request->setIgnoreJsonParse();
     // Session token is applied on the BridgeAPI io_context thread.
     boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
+    return cancelableCallback;
+}
+
+std::shared_ptr<WSNetCancelableCallback> BridgeAPI::checkIp(WSNetRequestFinishedCallback callback)
+{
+    auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
+    BaseRequest *request = bridgeapi_requests_factory::checkIp("", cancelableCallback);
+    boost::asio::post(io_context_, [this, request] { impl_->checkIp(std::unique_ptr<BaseRequest>(request)); });
     return cancelableCallback;
 }
 

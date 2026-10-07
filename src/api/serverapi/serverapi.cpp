@@ -11,8 +11,7 @@ ServerAPI::ServerAPI(boost::asio::io_context &io_context, WSNetHttpNetworkManage
     io_context_(io_context),
     persistentSettings_(persistentSettings),
     advancedParameters_(advancedParameters),
-    connectState_(connectState),
-    pingTest_(httpNetworkManager)
+    connectState_(connectState)
 {
     impl_ = std::make_unique<ServerAPI_impl>(io_context, httpNetworkManager, failoverContainer, persistentSettings_, advancedParameters, connectState);
     subscriberId_ = connectState_->subscribeConnectedToVpnState(std::bind(&ServerAPI::onVPNConnectStateChanged, this, std::placeholders::_1));
@@ -202,14 +201,6 @@ std::shared_ptr<WSNetCancelableCallback> ServerAPI::staticIps(const std::string 
     auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
     BaseRequest *request = serverapi_requests_factory::staticIps(authHash, version, Settings::instance().basePlatform(), Settings::instance().deviceId(), cancelableCallback);
     boost::asio::post(io_context_, [this, request] { impl_->executeRequest(std::unique_ptr<BaseRequest>(request)); });
-    return cancelableCallback;
-}
-
-std::shared_ptr<WSNetCancelableCallback> ServerAPI::pingTest(std::uint32_t timeoutMs, WSNetRequestFinishedCallback callback)
-{
-    // PingTest does not use a failover mechanism and has backup endpoint attempts, so it is implemented in a separate class
-    auto cancelableCallback = std::make_shared<CancelableCallback<WSNetRequestFinishedCallback>>(callback);
-    boost::asio::post(io_context_, [this, timeoutMs, cancelableCallback] { pingTest_.doPingTest(timeoutMs, cancelableCallback); });
     return cancelableCallback;
 }
 

@@ -189,6 +189,92 @@ The following results may be returned in the callback function:
 * *kNetworkError = 1*, *kNoNetworkConnection = 2*. Various network errors, it is recommended to repeat the request from the client side
 * *kFailoverFailed = 3*. This means that all failovers have been tried and none of them work. In this case, it is recommended to prompt the user to ignore SSL-errors and try the queries again. Otherwise, there's nothing more we can do. There will be no connection to the server API.
 
+# Control-plane transport, retries and failover
+
+This reference consolidates the wsnet-owned contracts from [Client API Traffic: Timeouts, Retries & Failover](https://www.notion.so/3ba3486d7afd80b7bca6edd59b4a0b2d) and [Client Control Plane Behavior & Failover](https://www.notion.so/e4a5a0d1cf1045c99a9789db782fb19e). Implementation statements below are checked against [source commit 3634de8462f9](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/commit/3634de8462f918123ba549231db2c805d901c267), not a certification of every shipped desktop/mobile pin. Browser-extension behavior, backend proxy configuration, historical rollout dates and cross-team planning remain in the source pages. Keep both pages until this replacement is accepted; this section does not authorize archival.
+
+## Request and timeout boundaries
+
+Ordinary requests use `https://<subdomain>.<domain>/<Endpoint>`. API requests add `platform` and `app_version` to query parameters for GET/DELETE or the form body for POST/PUT. The assets server-list request has its own URL builder, without those automatic platform fields. Authenticated request factories set a bearer token; unauthenticated endpoints do not acquire one automatically. The User-Agent is `Windscribe/<app_version> (<platform>)`. See [request construction](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/api/baserequest.cpp), [request factories](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/api/serverapi/serverapi_requestsfactory.cpp) and [HTTP setup](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/httpnetworkmanager/curlnetworkmanager.cpp).
+
+- The normal API timeout is **10 seconds per attempt**, including client DNS time, not a deadline for the entire failover/retry operation. DNS elapsed time is subtracted before curl runs. Individual request types can override this default.
+- Curl's connection-phase budget is `5000 ms * resolved IP count`, still bounded by the remaining total timeout. The older page's blanket 5-second failure rule is not the current total request timeout.
+- HTTP requests default to IPv4 resolution with DNS caching and fresh connections. `CURLOPT_FRESH_CONNECT` and `CURLOPT_FORBID_REUSE` prevent connection reuse by default; these are request options, not an immutable limitation of the HTTP manager.
+- TLS has a 1.2 minimum, verification uses the configured bundled trust material, and redirect following is not enabled. Ignoring SSL errors is an explicit client-controlled option, not automatic failover policy.
+- Async dispatch can overlap requests on the worker event loop. There is no general transport retry loop: distinguish route replacement in ServerAPI from caller/resource-manager backoff. Cancellation suppresses the callback, as described above.
+
+Sources: [timeout constant](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/settings.h), [DNS budget accounting](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/httpnetworkmanager/httpnetworkmanager_impl.cpp), [HTTP defaults](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/httpnetworkmanager/httprequest.cpp).
+
+## API answer versus broken route
+
+A successful transport is not necessarily an API answer. For ordinary JSON requests, the response must be a JSON object containing `data` or `errorCode`; endpoint-specific parsing can add requirements. `kSuccess` here means a valid API answer, including application errors, not a successful login or entitlement change.
+
+| Observation | ServerAPI handling |
+|---|---|
+| Non-5xx with a valid expected envelope, including 403 or 429 | Deliver the API answer; HTTP 429 alone does not trigger backoff or route replacement. |
+| HTTP 5xx | Return `kNetworkError`, retain the route and let caller backoff pace retries. A disconnected route returning only 5xx for the 5-minute doubt window can be replaced; a successful API answer resets that window. |
+| Empty, malformed or missing-envelope body | Treat as incorrect JSON and potentially replace the disconnected route. A middlebox HTML page is not a valid API error. |
+| Raw-body request such as ServerConfigs | Non-2xx is not accepted merely because JSON parsing is disabled. |
+| Device offline | Return `kNoNetworkConnection`; do not blame the route. |
+| Other transport failure | Reprobe while disconnected, except a DNS failure on an already confirmed route is normally returned as `kNetworkError`. An unconfirmed persisted/fast-path route can reprobe even after DNS failure. |
+
+The [response classifier](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/api/serverapi/serverapi_impl.cpp) re-executes failed requests through failover and marks sibling in-flight requests for discard when changing route. This is not an exactly-once guarantee for POST/PUT: a lost response does not prove the server did not apply a request. Do not add application retries assuming they are harmless. When every probe fails, prior API success yields `kNetworkError` with reset state; without prior success the queue receives `kFailoverFailed`.
+
+## Route selection and anti-censorship mechanisms
+
+VPN-connected requests use the primary domain rather than cycling the disconnected failover set. Disconnected routing can reuse the persisted working method, then validate it with a real request. Requests queue behind shared discovery, not a separate probe fan-out per request. A validated route has a 15-minute probe-cache freshness window, renewed by successful requests; when route data expires, a fresh cache permits re-resolving that method rather than a full probe. Save/restore settings and notify connectivity/VPN state as required in ServerAPI Notes above.
+
+The private [failover container](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/private/failover/failovercontainer.cpp) defines this **priority order**, not a promise of serial network execution:
+
+1. Primary `windscribe.com`, then backup `totallyacdn.com`.
+2. Dynamic TXT discovery through Cloudflare candidates, then Google candidates.
+3. Legacy monthly generated domains (`RandomDomainFailover`), still in the candidate list. This is distinct from the historical, unshipped `api-dga` replacement proposal in Notion. Do not copy generator secrets into documentation or interpret a deprecation intention as removal.
+4. ECH discovery, then fallback ECH configuration.
+5. API-access IP discovery, with the two access-IP candidates randomized.
+6. CDN domain fronting (Fastly).
+
+[FailoverProbeExecutor](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/api/serverapi/failoverprobeexecutor.cpp) launches discovery in parallel and probes candidates with `MyIp`, taking the first valid winner and canceling losing probes. The [limits](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/api/serverapi/failoverprobeexecutor.h) are four concurrent probes and a 250 ms hedge timer. Readiness and priority determine launches; the old instruction to wait for Cloudflare failure before trying Google is not current execution semantics. Staging restricts the private container to the default domain; the public build has a separate minimal container.
+
+| Mechanism | Current wsnet contract |
+|---|---|
+| Dynamic DoH | TXT name `dynamic-api-host2.windscribe.com` for desktop, `dynamic-api-host3.windscribe.com` for Android/iOS. JSON DoH discovery uses the normal 10-second timeout. The source page's extension name `dynamic-api-host.windscribe.com` belongs to the extension, not this native library. |
+| ECH | TXT configuration at `echconfig001.windscribe.dev`, or `fallback.echconfig001.windscribe.dev`, used with `ech-public-test.windscribe.dev`. Normal configuration honors its nonzero TTL; fallback is treated as non-expiring by this code. |
+| Direct IP | Access-IP discovery obtains routes. API requests use the IP root; assets use the `/assets` path transformation rather than an `assets.<IP>` hostname. Historical fixed IP examples are not a current endpoint inventory. |
+| Fastly | Backend root `pizdets.ca`; fronting candidates `www.esquire.com`, `cdn.yelp.com`, `pypi.org`. Curl connects using the fronting URL/SNI but preserves the real API/assets hostname in `Host`. Do not test ordinary DNS for `api.pizdets.ca` as though it were the fronting transport. Country/IP handling in Fastly VCL and the backend is a separate owner contract, not implemented by this library. |
+
+Sources: [private settings](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/private/privatesettings.h), [DoH](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/private/failover/failovers/dynamicdomainfailover.cpp), [ECH](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/private/failover/failovers/echfailover.cpp), [direct-IP discovery](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/private/failover/failovers/accessipsfailover.cpp).
+
+Tunnel validation and BridgeAPI are separate paths, not additional ServerAPI failover stages. The source pages refer to the older `pingTest` API and `checkip.windscribe.com`; current source has a [tunnel-test subsystem](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/tunneltest/tunneltest_impl.cpp) and configures `checkip.windscribe.net` plus `checkip-fly.windscribe.com`. Do not equate those hosts with `MyIp` probe routing or copy old queue/backup behavior onto the new subsystem. [BridgeAPI](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/api/bridgeapi/bridgeapi_impl.cpp) uses the separate in-tunnel address `10.255.255.1:19800`, session-token requests and no ServerAPI failover. WireGuard init/connect requests remain high-priority in the request factory.
+
+## Resource refresh and backoff
+
+The desktop-oriented `ApiResourcesManager` owns the following defaults. They are configurable through `setUpdateIntervals`; mobile app foreground policy is not established by these defaults.
+
+| Resource | Default interval |
+|---|---|
+| Session, VPN connected | 1 minute |
+| Session, VPN disconnected | 1 hour |
+| Notifications | 1 hour |
+| Inventory locations/servers, StaticIps, server configs/credentials, PortMap, CheckUpdate, AmneziaWG unblock parameters | 24 hours |
+
+The [manager implementation](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/apiresourcesmanager/apiresourcesmanager.cpp) maintains Inventory v2 snapshots and Session inventory deltas, not simply the old assets-list revision flow. Initial authenticated fetches, explicit fetch calls, account changes and inventory deltas can cause earlier updates; the table is not a minimum request spacing guarantee. WireGuard connect-intent/key initialization is not an unconditional 24-hour resource fetch.
+
+Failed resource requests use per-resource exponential backoff with nominal bounds 1s, 2s, 4s and so on, capped at 5 minutes, then uniform jitter in `[bound/2, bound]`. Thus the first delay can be 0.5 seconds, not an exact 1-second sleep. Interactive login/session/signup/auth-token retries cap at 1 minute. Offline failures do not advance the failure count. Explicit new interactive attempts reset their counters and cancel superseded retry timers. See [defaults and retry state](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/apiresourcesmanager/apiresourcesmanager.h).
+
+The older source page's launch/foreground/connect-error schedule is cross-platform intended behavior, not proof every consumer implements it. Its proposed `Session.refetch_res` array protocol (empty means all resources, otherwise named resources, with a 12-hour repeat guard cleared when the flag disappears) remains **unimplemented planning**, not a supported wsnet API contract. Do not confuse it with existing explicit fetch methods or inventory deltas.
+
+## Sticky country-specific server lists
+
+The original requirement is to retain a restricted-network list while connected through a VPN, rather than replacing it with a list geolocated from the VPN exit. The current [legacy assets ServerLocations implementation](https://gitlab.int.windscribe.com/ws/client/client-libs/wsnet/-/blob/3634de8462f918123ba549231db2c805d901c267/src/api/serverapi/serverlocations_request.cpp) is more precise than the source page's unconditional append/reset wording:
+
+- Learn or clear persisted `info.country_override` only if the request began disconnected and the client is still disconnected when the answer arrives.
+- Automatically send that saved override only while VPN-connected. A disconnected request can be geolocated again without the sticky value.
+- An explicit advanced override takes precedence; the ignore-country-override option sends `ZZ`.
+- Do not erase or replace the saved value if the request began connected or the client is connected when the response arrives. These are start/completion checks, not a transition-epoch guard. Missing override clears it only in the disconnected-to-disconnected case.
+- Inventory v2 request construction is separate and can use an explicit advanced override. Do not generalize the legacy assets sticky-list lifecycle to all inventory endpoints or every shipped consumer.
+
+The source pages retain browser-extension limits, node TLS identity context, backend/edge setup, historical endpoint and user-agent rollout records, proposed refetch behavior, and consumer launch/foreground requirements. Those sections are not made redundant by this bounded wsnet migration.
+
 # Versioning
 
 The library version is derived automatically from git tags at build time — no manual edits to `CMakeLists.txt` are needed.

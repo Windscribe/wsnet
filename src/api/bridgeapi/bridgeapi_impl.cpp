@@ -5,6 +5,7 @@
 #include "bridgetokenrequest.h"
 #include "settings.h"
 #include "utils/cancelablecallback.h"
+#include "utils/utils.h"
 #include "utils/wsnet_logger.h"
 #include "utils/requesterror.h"
 
@@ -32,15 +33,22 @@ BridgeAPI_impl::~BridgeAPI_impl()
         queuedPinIpRequest_->callCallback();
         queuedPinIpRequest_.reset();
     }
+    // Dropped without a callback, like the in-flight requests above: the io_context is stopped by
+    // now and the waiter (TunnelTest) is destroyed before this object, so a callback would land in freed memory.
+    queuedCheckIpRequests_.clear();
 }
 
 void BridgeAPI_impl::setConnectedState(bool isConnected)
 {
+    if (isConnected != isConnected_) {
+        ++connectionGeneration_;
+    }
+
     if (isConnected && !isConnected_) {
-        auto host = currentHost();
+        auto nodeId = currentNodeId();
         if (isTokenRequestSuppressed()) {
             isFetchingToken_ = false;
-            g_logger->info("BridgeAPI_impl::setConnectedState, suppressing token request for host '{}'", host);
+            g_logger->info("BridgeAPI_impl::setConnectedState, suppressing token request for node {}", nodeId);
             if (apiAvailableCallback_) {
                 apiAvailableCallback_(false);
             }
@@ -60,24 +68,25 @@ void BridgeAPI_impl::setConnectedState(bool isConnected)
                 auto now = std::chrono::system_clock::now();
                 auto nowTimestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
                 if (nowTimestamp >= token->second) {
-                    g_logger->info("Removing expired session token for host '{}'", host);
+                    g_logger->info("Removing expired session token for node {}", nodeId);
                     clearSessionToken();
                 } else {
                     // Token is not expired, set expiry time to 0 since it's valid until disconnection
                     currentToken = token->first;
-                    setSessionTokenForCurrentHost(currentToken, 0);
+                    setSessionTokenForCurrentNode(currentToken, 0);
                 }
             } else {
                 currentToken = token->first;
             }
         }
 
-        g_logger->info("BridgeAPI_impl::setConnectedState, fetching token for host '{}'{}", host, currentToken.empty() ? "" : " with cached token");
+        g_logger->info("BridgeAPI_impl::setConnectedState, fetching token for node {}{}", nodeId, currentToken.empty() ? "" : " with cached token");
         isFetchingToken_ = true;
         auto request = std::unique_ptr<BaseRequest>(bridgeapi_requests_factory::fetchToken(currentToken, nullptr));
         executeRequestImpl(std::move(request));
     } else if (!isConnected) {
         setSessionTokenExpiry();
+        clearSessionTokenIfNodeless();
         isFetchingToken_ = false;
 
         // Clear any queued pinIp request since we're disconnected
@@ -87,6 +96,7 @@ void BridgeAPI_impl::setConnectedState(bool isConnected)
             queuedPinIpRequest_->callCallback();
             queuedPinIpRequest_.reset();
         }
+        failQueuedCheckIpRequests(ApiRetCode::kNoNetworkConnection);
 
         // Notify that the API is no longer available
         if (apiAvailableCallback_) {
@@ -145,7 +155,7 @@ void BridgeAPI_impl::executeRequestImpl(std::unique_ptr<BaseRequest> request)
     std::uint64_t requestId = curUniqueId_++;
     auto asyncCallback_ = httpNetworkManager_->executeRequestEx(httpRequest, requestId, std::bind(&BridgeAPI_impl::onHttpNetworkRequestFinished, this, _1, _2, _3, _4),
                                                                 std::bind(&BridgeAPI_impl::onHttpNetworkRequestProgressCallback, this, _1, _2, _3));
-    HttpRequestInfo hti { std::move(request), asyncCallback_};
+    HttpRequestInfo hti { std::move(request), asyncCallback_, connectionGeneration_ };
     activeHttpRequests_[requestId] = std::move(hti);
 }
 
@@ -181,6 +191,16 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
         return;
     }
 
+    // Answering about a tunnel that no longer exists. Its token belongs to a node and a source IP
+    // we have left, and its outcome says nothing about the connection we are on now -- storing it
+    // would put one node's token under another's key, which is the whole thing node ids prevent.
+    if (it->second.generation != connectionGeneration_) {
+        g_logger->info("BridgeAPI request '{}' finished on a previous connection, ignoring result", it->second.request->name());
+        setErrorCodeAndEmitRequestFinished(it->second.request.get(), ApiRetCode::kNoNetworkConnection);
+        activeHttpRequests_.erase(it);
+        return;
+    }
+
     // Extract HTTP response code from the error object
     int httpResponseCode = 0;
     auto requestError = std::dynamic_pointer_cast<RequestError>(error);
@@ -192,13 +212,6 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
     auto tokenRequest = dynamic_cast<BridgeTokenRequest*>(it->second.request.get());
     bool isTokenRequest = (tokenRequest != nullptr);
 
-    // If this is a token request and we're no longer connected, ignore the result
-    if (isTokenRequest && !isConnected_) {
-        g_logger->info("Token request finished but no longer connected, ignoring result");
-        activeHttpRequests_.erase(it);
-        return;
-    }
-
     if (error->isSuccess() && httpResponseCode == 200) {
         if (advancedParameters_->isLogApiResponce()) {
             g_logger->info("API request {} finished", it->second.request->name());
@@ -209,8 +222,8 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
             if (isTokenRequest) {
                 isFetchingToken_ = false;
                 std::string newToken = tokenRequest->getSessionToken();
-                setSessionTokenForCurrentHost(newToken, 0);
-                g_logger->info("Successfully received session token for host '{}'", currentHost());
+                setSessionTokenForCurrentNode(newToken, 0);
+                g_logger->info("Successfully received session token for node {}", currentNodeId());
 
                 // Notify that the API is now available
                 if (apiAvailableCallback_) {
@@ -223,6 +236,7 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
                     executeRequest(std::move(queuedPinIpRequest_));
                     queuedPinIpRequest_.reset();
                 }
+                runQueuedCheckIpRequests();
             } else {
                 it->second.request->callCallback();
             }
@@ -234,27 +248,40 @@ void BridgeAPI_impl::onHttpNetworkRequestFinished(std::uint64_t requestId, std::
     // Failure
     if (isTokenRequest) {
         auto token = sessionToken();
-        if (token && error->isSuccess()) {
-            // We have an existing token and server told us it's no good (i.e. httpResponseCode != 200), try getting a new one
+        // We have an existing token and server told us it's no good (i.e. httpResponseCode != 200), try getting a new one
+        const bool isRetrying = token && error->isSuccess();
+        if (isRetrying) {
             clearSessionToken();
-            g_logger->info("Token request failed {} (HTTP response code: {}), clearing cached token for host '{}' and trying again", error->toString(), httpResponseCode, currentHost());
+            g_logger->info("Token request failed {} (HTTP response code: {}), clearing cached token for node {} and trying again", error->toString(), httpResponseCode, currentNodeId());
             auto request = std::unique_ptr<BaseRequest>(bridgeapi_requests_factory::fetchToken("", nullptr));
             executeRequestImpl(std::move(request));
         } else {
             isFetchingToken_ = false;
-            g_logger->info("Token request failed: {} (HTTP response code: {})", error->toString(), httpResponseCode);
+            g_logger->info("Token request failed: {} (HTTP response code: {}), body: {}", error->toString(), httpResponseCode, data);
         }
 
-        // Clear any queued pinIp request since token fetch failed
-        if (queuedPinIpRequest_) {
+        // The queued pin is the whole reason a token is being fetched, and the retry above -- which
+        // asks for a fresh token instead of presenting the one the node rejected -- is the attempt
+        // most likely to get one. Failing the pin here would throw it away a moment before that
+        // lands. The retry cleared the token, so a second failure takes the branch above and ends it.
+        if (!isRetrying && queuedPinIpRequest_) {
             g_logger->info("Clearing queued pinIp request due to token fetch failure");
             queuedPinIpRequest_->setRetCode(ApiRetCode::kNoToken);
             queuedPinIpRequest_->callCallback();
             queuedPinIpRequest_.reset();
         }
+        if (!isRetrying) {
+            failQueuedCheckIpRequests(ApiRetCode::kNoToken);
+        }
     } else {
-        g_logger->info("API request {} failed with error = {} (HTTP response code: {})", it->second.request->name(), error->toString(), httpResponseCode);
-        setErrorCodeAndEmitRequestFinished(it->second.request.get(), it->second.request->retCode() == ApiRetCode::kSuccess ? ApiRetCode::kBridgeApiError : it->second.request->retCode());
+        g_logger->info("API request {} failed with error = {} (HTTP response code: {}) in {} ms", it->second.request->name(), error->toString(), httpResponseCode, elapsedMs);
+        // A transport failure never reached the node, so it says nothing about what the node would
+        // answer; callers retry it, unlike an answer the node actually gave.
+        ApiRetCode retCode = ApiRetCode::kNetworkError;
+        if (error->isSuccess()) {
+            retCode = it->second.request->retCode() == ApiRetCode::kSuccess ? ApiRetCode::kBridgeApiError : it->second.request->retCode();
+        }
+        setErrorCodeAndEmitRequestFinished(it->second.request.get(), retCode);
     }
     activeHttpRequests_.erase(it);
 }
@@ -272,11 +299,7 @@ void BridgeAPI_impl::onHttpNetworkRequestProgressCallback(std::uint64_t requestI
 std::optional<std::pair<std::string, std::int64_t>> BridgeAPI_impl::sessionToken() const
 {
     std::lock_guard locker(sessionTokenMutex_);
-    auto it = sessionTokens_.find(currentHost_);
-    if (it != sessionTokens_.end()) {
-        return it->second;
-    }
-    return std::nullopt;
+    return currentToken_;
 }
 
 bool BridgeAPI_impl::hasSessionToken() const
@@ -303,58 +326,135 @@ void BridgeAPI_impl::pinIp(std::unique_ptr<BaseRequest> request)
     // Otherwise, the request will be executed when the token fetch completes, or cancelled if the token request fails
 }
 
+void BridgeAPI_impl::checkIp(std::unique_ptr<BaseRequest> request)
+{
+    // On reconnect the cached token is current while its refresh is in flight, and the node rejects
+    // it until the refresh lands.
+    if (isConnected_ && isFetchingToken_) {
+        queuedCheckIpRequests_.emplace_back(std::move(request), std::chrono::steady_clock::now());
+        return;
+    }
+    executeRequest(std::move(request));
+}
+
+void BridgeAPI_impl::runQueuedCheckIpRequests()
+{
+    auto requests = std::move(queuedCheckIpRequests_);
+    queuedCheckIpRequests_.clear();
+    for (auto &[request, queuedAt] : requests) {
+        // Split out so the logs show how much of a slow checkIp was the token, not the node.
+        g_logger->info("BridgeAPI checkIp waited {} ms for the token refresh", utils::since(queuedAt).count());
+        executeRequest(std::move(request));
+    }
+}
+
+void BridgeAPI_impl::failQueuedCheckIpRequests(ApiRetCode retCode)
+{
+    auto requests = std::move(queuedCheckIpRequests_);
+    queuedCheckIpRequests_.clear();
+    for (auto &entry : requests) {
+        entry.first->setRetCode(retCode);
+        entry.first->callCallback();
+    }
+}
+
 void BridgeAPI_impl::clearSessionToken()
 {
     std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens;
+    bool persist = false;
     {
         std::lock_guard locker(sessionTokenMutex_);
-        sessionTokens_.erase(currentHost_);
-        sessionTokens = sessionTokens_;
+        currentToken_.reset();
+        if (currentNodeId_ != 0 && sessionTokens_.erase(std::to_string(currentNodeId_)) > 0) {
+            sessionTokens = sessionTokens_;
+            persist = true;
+        }
     }
-    persistentSettings_.setSessionTokens(sessionTokens);
+    if (persist) {
+        persistentSettings_.setSessionTokens(sessionTokens);
+    }
 }
 
-void BridgeAPI_impl::setCurrentHost(const std::string &host)
+void BridgeAPI_impl::clearSessionTokenIfNodeless()
 {
-    g_logger->info("BridgeAPI_impl::setCurrentHost: '{}'", host);
+    // A custom config's token was never keyed by anything, so nothing will look it up again -- and
+    // the next nodeless connection is a different tunnel source IP, which the token is scoped to.
+    // Drop it with the connection instead of letting it outlive it and be presented to a node that
+    // never issued it.
     std::lock_guard locker(sessionTokenMutex_);
-    currentHost_ = host;
+    if (currentNodeId_ == 0) {
+        currentToken_.reset();
+    }
+}
+
+void BridgeAPI_impl::setCurrentNodeId(std::int32_t nodeId)
+{
+    g_logger->info("BridgeAPI_impl::setCurrentNodeId: {}", nodeId);
+    std::lock_guard locker(sessionTokenMutex_);
+    // Only a positive id names a node we can key on. The persisted form is a JSON object whose keys
+    // are digits, so a negative id would be written and then dropped by the next load -- a token
+    // silently lost rather than a cache miss anyone could see. Collapse it to "no node" up front.
+    const std::int32_t newNodeId = nodeId > 0 ? nodeId : 0;
+    // Re-stating the same node changes nothing and must not: a nodeless token lives only here, so
+    // dropping it on a repeat call would lose it for good and leave a live connection with nothing
+    // to sign with. A token that genuinely has to go is dropped on disconnect instead.
+    if (newNodeId == currentNodeId_) {
+        return;
+    }
+    currentNodeId_ = newNodeId;
+    // Whatever the previous connection was signing with is not this connection's to present: the
+    // token belongs to one node and one tunnel source IP. Only a stored token for this very node can
+    // still be live, and only until the node drops its own copy.
+    currentToken_.reset();
+    if (currentNodeId_ == 0) {
+        return;
+    }
+    auto it = sessionTokens_.find(std::to_string(currentNodeId_));
+    if (it != sessionTokens_.end()) {
+        currentToken_ = it->second;
+    }
 }
 
 void BridgeAPI_impl::setSessionTokenExpiry()
 {
-    std::string host;
+    std::int32_t nodeId = 0;
     std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens;
     bool updated = false;
     {
         std::lock_guard locker(sessionTokenMutex_);
-        auto it = sessionTokens_.find(currentHost_);
-        if (it != sessionTokens_.end()) {
+        if (currentNodeId_ != 0 && currentToken_ && currentToken_->second == 0) {
             auto expiryTime = std::chrono::system_clock::now() + std::chrono::hours(24);
             auto expiryTimestamp = std::chrono::duration_cast<std::chrono::seconds>(expiryTime.time_since_epoch()).count();
-            if (it->second.second == 0) {
-                it->second.second = expiryTimestamp;
-                host = currentHost_;
-                sessionTokens = sessionTokens_;
-                updated = true;
-            }
+            currentToken_->second = expiryTimestamp;
+            sessionTokens_[std::to_string(currentNodeId_)] = *currentToken_;
+            sessionTokens = sessionTokens_;
+            nodeId = currentNodeId_;
+            updated = true;
         }
     }
     if (updated) {
         persistentSettings_.setSessionTokens(sessionTokens);
-        g_logger->info("Set session token expiry to 24 hours from disconnect for host '{}'", host);
+        g_logger->info("Set session token expiry to 24 hours from disconnect for node {}", nodeId);
     }
 }
 
-void BridgeAPI_impl::setSessionTokenForCurrentHost(const std::string &token, std::int64_t expiry)
+void BridgeAPI_impl::setSessionTokenForCurrentNode(const std::string &token, std::int64_t expiry)
 {
     std::map<std::string, std::pair<std::string, std::int64_t>> sessionTokens;
+    bool persist = false;
     {
         std::lock_guard locker(sessionTokenMutex_);
-        sessionTokens_[currentHost_] = {token, expiry};
-        sessionTokens = sessionTokens_;
+        currentToken_ = std::make_pair(token, expiry);
+        // A custom config has no node to key on, so its token stays with the connection that got it.
+        if (currentNodeId_ != 0) {
+            sessionTokens_[std::to_string(currentNodeId_)] = *currentToken_;
+            sessionTokens = sessionTokens_;
+            persist = true;
+        }
     }
-    persistentSettings_.setSessionTokens(sessionTokens);
+    if (persist) {
+        persistentSettings_.setSessionTokens(sessionTokens);
+    }
 }
 
 void BridgeAPI_impl::applySessionToken(std::unique_ptr<BaseRequest> &request) const
@@ -370,10 +470,10 @@ void BridgeAPI_impl::applySessionToken(std::unique_ptr<BaseRequest> &request) co
     }
 }
 
-std::string BridgeAPI_impl::currentHost() const
+std::int32_t BridgeAPI_impl::currentNodeId() const
 {
     std::lock_guard locker(sessionTokenMutex_);
-    return currentHost_;
+    return currentNodeId_;
 }
 
 } // namespace wsnet

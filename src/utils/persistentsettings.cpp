@@ -64,6 +64,14 @@ PersistentSettings::PersistentSettings(const std::string &settings)
                 auto now = std::chrono::system_clock::now();
                 auto nowTimestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
                 for (auto& m : jsonObject["sessionToken"].GetObject()) {
+                    // Tokens used to be keyed by the node's hostname, which stopped naming one node
+                    // once a datacenter could answer to a single hostname; they are keyed by node id
+                    // now. A legacy entry cannot be mapped to an id, and the node dropped its own
+                    // copy long ago, so drop it rather than carry a key nothing will ever look up.
+                    const std::string key = m.name.GetString();
+                    if (key.empty() || key.find_first_not_of("0123456789") != std::string::npos) {
+                        continue;
+                    }
                     if (m.value.IsObject()) {
                         auto tokenObj = m.value.GetObject();
                         if (tokenObj.HasMember("token") && tokenObj["token"].IsString() &&
@@ -71,13 +79,13 @@ PersistentSettings::PersistentSettings(const std::string &settings)
                             std::int64_t expiryTimestamp = tokenObj["expiry"].GetInt64();
                             if (expiryTimestamp > nowTimestamp) {
                                 // Valid token
-                                sessionTokens_[m.name.GetString()] = {tokenObj["token"].GetString(), expiryTimestamp};
+                                sessionTokens_[key] = {tokenObj["token"].GetString(), expiryTimestamp};
                             } else if (expiryTimestamp == 0) {
                                 // No expiry time (reboot without disconnecting?) Set expiry time to 24h from now
-                                sessionTokens_[m.name.GetString()] = {tokenObj["token"].GetString(), nowTimestamp + 86400};
+                                sessionTokens_[key] = {tokenObj["token"].GetString(), nowTimestamp + 86400};
                             } else {
                                 // Expired token
-                                sessionTokens_.erase(m.name.GetString());
+                                sessionTokens_.erase(key);
                             }
                         }
                     }

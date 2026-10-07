@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "scapix_object.h"
+#include "WSNetDnsResolver.h"
 
 namespace wsnet {
 
@@ -77,6 +78,11 @@ public:
     // empty by default
     virtual void setSessionToken(const std::string &token) = 0;
     virtual std::string sessionToken() const = 0;
+
+    // kIpv4 by default. DNS is asked only for this family and the request connects only over it, so
+    // kIpv6 fails when the host has no AAAA record or the network has no IPv6 route.
+    virtual void setIpFamily(IpFamily ipFamily) = 0;
+    virtual IpFamily ipFamily() const = 0;
 };
 
 } // namespace wsnet

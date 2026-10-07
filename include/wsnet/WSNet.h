@@ -7,6 +7,7 @@
 #include "WSNetHttpNetworkManager.h"
 #include "WSNetBridgeAPI.h"
 #include "WSNetServerAPI.h"
+#include "WSNetTunnelTest.h"
 #include "WSNetEmergencyConnect.h"
 #include "WSNetPingManager.h"
 #include "WSNetAdvancedParameters.h"
@@ -48,6 +49,7 @@ public:
     virtual std::shared_ptr<WSNetHttpNetworkManager> httpNetworkManager() = 0;
     virtual std::shared_ptr<WSNetBridgeAPI> bridgeAPI() = 0;
     virtual std::shared_ptr<WSNetServerAPI> serverAPI() = 0;
+    virtual std::shared_ptr<WSNetTunnelTest> tunnelTest() = 0;
     virtual std::shared_ptr<WSNetApiResourcesManager> apiResourcersManager() = 0;
     virtual std::shared_ptr<WSNetEmergencyConnect> emergencyConnect() = 0;
     virtual std::shared_ptr<WSNetPingManager> pingManager() = 0;

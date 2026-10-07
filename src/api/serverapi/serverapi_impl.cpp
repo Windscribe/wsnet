@@ -155,7 +155,7 @@ void ServerAPI_impl::executeRequest(std::unique_ptr<BaseRequest> request)
     }
 
     // failoverState_ == kUnknown: queue the request and start discovery (fast path or probe).
-    // Take priority into account so that wgConfigsInit/wgConfigsConnect/pingTest get drained first.
+    // Take priority into account so that wgConfigsInit/wgConfigsConnect get drained first.
     if (request->priority() == RequestPriority::kHigh)
         queueRequests_.push_front(std::move(request));
     else
