@@ -1,3 +1,8 @@
+1.5.39 (09/10/2026)
+All:
+   * Updated the vcpkg baseline to 2026-10-08 and the ws-vcpkg-registry baseline to match, which moves Boost to 1.92.0, spdlog to 1.17.0 and fmt to 12.2.0. ADVobfuscator stays pinned to its 2020-06-26 version, because 2.x is a C++20 rewrite with a different API. Boost.Process 1.92.0 is patched to keep using the default locale on Linux, since its new `std::locale("")` throws when `LC_ALL` or `LANG` names a locale that is not installed, which failed every process launch, including ICMP pings.
+
+
 1.5.38 (05/10/2026)
    * Updated ws-vcpkg-registry baseline to pick up OpenSSL 4.0.3 port.
 

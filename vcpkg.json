@@ -25,5 +25,8 @@
     "cpp-base64",
     "c-ares",
     "advobfuscator"
+    ],
+"overrides": [
+    { "name": "advobfuscator", "version": "2020-06-26" }
     ]
 }
