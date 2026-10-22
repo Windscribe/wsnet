@@ -1,3 +1,25 @@
+1.5.43 (21/10/2026)
+All:
+   * Updated the embedded CA bundle to the curl/Mozilla bundle as of 2026-10-20, which no longer trusts the Comodo AAA Services root that chains the compromised eMudhra intermediates.
+   * Tests now include `<thread>` explicitly, since newer libc++ no longer provides `std::this_thread` through `<future>` and other headers.
+
+
+1.5.42 (20/10/2026)
+All:
+   * Updated the ws-vcpkg-registry baseline to pick up the cURL 8.23.0 port.
+
+
+1.5.41 (20/10/2026)
+All:
+   * The tunnel-test endpoints are now `checkip.cdn8088.com` (primary) and `checkip.level91.net` (backup), replacing `checkip.windscribe.net` and `checkip-fly.windscribe.com`.
+
+
+1.5.40 (14/10/2026)
+All:
+   * Updated the ws-vcpkg-registry baseline to pick up the macOS triplets' new minimum deployment target of 14.4, which Qt 6.12 requires.
+   * Raised wsnet's own macOS deployment target from 12 to 14.4 to match.
+
+
 1.5.39 (09/10/2026)
 All:
    * Updated the vcpkg baseline to 2026-10-08 and the ws-vcpkg-registry baseline to match, which moves Boost to 1.92.0, spdlog to 1.17.0 and fmt to 12.2.0. ADVobfuscator stays pinned to its 2020-06-26 version, because 2.x is a C++20 rewrite with a different API. Boost.Process 1.92.0 is patched to keep using the default locale on Linux, since its new `std::locale("")` throws when `LC_ALL` or `LANG` names a locale that is not installed, which failed every process launch, including ICMP pings.

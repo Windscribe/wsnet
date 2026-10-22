@@ -97,8 +97,8 @@ public:
     std::vector<std::string> tunnelTestEndpoints() const
     {
         std::vector<std::string> list;
-        list.push_back("checkip.windscribe.net");
-        list.push_back("checkip-fly.windscribe.com");
+        list.push_back("checkip.cdn8088.com");
+        list.push_back("checkip.level91.net");
         return list;
     }
 

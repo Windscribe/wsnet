@@ -1138,6 +1138,9 @@ void ApiResourcesManager::scheduleInteractiveRetry(std::shared_ptr<boost::asio::
     retryTimer->expires_after(std::chrono::milliseconds(delayMs));
     // &retryTimer refers to a member of *this, so it stays valid for as long as `this` -- the
     // same lifetime guarded() already relies on.
+    // The analyzer in clang-tidy 23 loses track of `reissue` once asio takes ownership of the handler
+    // and reports its std::function storage as leaked; it is freed with the handler.
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     retryTimer->async_wait(guarded([this, &retryTimer, timer = retryTimer, reissue = std::move(reissue)](const boost::system::error_code &ec) {
         if (ec || timer != retryTimer)
             return;
