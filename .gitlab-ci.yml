@@ -23,14 +23,20 @@ variables:
   NIGHTLY_TEST_BUILD: 'n'
   GIT_DEPTH: 0 # Full clone required to reach git tags for version detection
   VCPKG_ROOT_WINDOWS: 'c:\vcpkg'
+  CCACHE_BASEDIR: '$CI_PROJECT_DIR'
+  CCACHE_COMPILERCHECK: 'content'
+  CCACHE_MAXSIZE: '10G'
+  CCACHE_NOHASHDIR: '1'
+  CCACHE_REMOTE_STORAGE: 'https://${NEXUS_USERNAME}:${NEXUS_PASSWORD}@nexus.int.windscribe.com/repository/client-desktop/client-desktop/ccache'
 
 .template_win10_build: &template_win10_build
   tags: [win10qty6]
   before_script:
     - $env:VCPKG_ROOT = $env:VCPKG_ROOT_WINDOWS
-    - $env:VCPKG_CA_BUNDLE = "$(Get-Location)\tools\cacert.pem"
     - $env:VCPKG_BINARY_SOURCES = "clear;http,https://${env:NEXUS_USERNAME}:${env:NEXUS_PASSWORD}@nexus.int.windscribe.com/repository/client-desktop/client-desktop/vcpkg_cache/current/binary_cache/{sha}.zip,readwrite"
     - $env:VCPKG_INSTALL_OPTIONS = "--clean-after-build"
+    - $env:CCACHE_DIR = "C:\ccache\cache"
+    - $env:PATH = "C:\ccache;$env:PATH"
     - if (Test-Path ws-vcpkg-registry) { Remove-Item -Recurse -Force ws-vcpkg-registry }
     - git clone https://github.com/Windscribe/ws-vcpkg-registry.git
     - .\ws-vcpkg-registry\install-vcpkg\vcpkg_install.bat $env:VCPKG_ROOT_WINDOWS --configure-git
@@ -41,7 +47,6 @@ variables:
   before_script:
     - export VCPKG_ROOT="${HOME}/vcpkg"
     - export VCPKG_INSTALL_OPTIONS="--clean-after-build"
-    - export VCPKG_CA_BUNDLE="$(pwd)/tools/cacert.pem"
     - export VCPKG_BINARY_SOURCES="clear;http,https://${NEXUS_USERNAME}:${NEXUS_PASSWORD}@nexus.int.windscribe.com/repository/client-desktop/client-desktop/vcpkg_cache/current/binary_cache/{sha}.zip,readwrite"
     - rm -rf ws-vcpkg-registry
     - git clone https://github.com/Windscribe/ws-vcpkg-registry.git
@@ -53,7 +58,8 @@ variables:
   before_script:
     - export VCPKG_ROOT="${HOME}/vcpkg"
     - export VCPKG_INSTALL_OPTIONS="--clean-after-build"
-    - export VCPKG_CA_BUNDLE="$(pwd)/tools/cacert.pem"
+    # Containers start empty, so a local ccache directory would only add work.
+    - export CCACHE_REMOTE_ONLY=true
     - export VCPKG_BINARY_SOURCES="clear;http,https://${NEXUS_USERNAME}:${NEXUS_PASSWORD}@nexus.int.windscribe.com/repository/client-desktop/client-desktop/vcpkg_cache/current/binary_cache/{sha}.zip,readwrite"
     - rm -rf ws-vcpkg-registry
     - git clone https://github.com/Windscribe/ws-vcpkg-registry.git
@@ -67,11 +73,20 @@ build:wsnet:win:
   variables:
     GIT_STRATEGY: clone
   script:
-    - cmake -B build -S .
+    # The Visual Studio generator ignores compiler launchers, so ccache needs Ninja inside a VS developer shell.
+    - $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+    - Import-Module "$vsPath\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+    - Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments "-arch=amd64 -host_arch=amd64"
+    - cmake -B build -S . -G Ninja
+      -DCMAKE_BUILD_TYPE=Release
       -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-x64-windows-static-release
       -DVCPKG_HOST_TRIPLET=ws-x64-windows-static-release
-    - cmake --build build --config Release --parallel
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    - ccache --zero-stats
+    - cmake --build build --parallel
+    - ccache --show-stats
   rules:
     - if: $BUILD_WIN == "y" && $CI_PIPELINE_SOURCE == "push"
   artifacts:
@@ -88,8 +103,13 @@ build:wsnet:mac:
     - cmake -B build -S .
       -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-universal-osx
-      "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations,-clang-analyzer-osx.cocoa.RetainCount,-clang-analyzer-nullability.NullablePassedToNonnull;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      -DCMAKE_OBJC_COMPILER_LAUNCHER=ccache
+      -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache
+    - ccache --zero-stats
     - cmake --build build --parallel
+    - ccache --show-stats
   artifacts:
     expire_in: 1 day
     paths:
@@ -103,12 +123,14 @@ build:wsnet:rhel:
   variables:
     GIT_STRATEGY: clone
   script:
-    - python3 -m pip install clang-tidy
     - cmake -B build -S .
       -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       -DVCPKG_TARGET_TRIPLET=ws-x64-linux
-      "-DCMAKE_CXX_CLANG_TIDY=clang-tidy;--checks=clang-analyzer-*,-clang-analyzer-optin.cplusplus.VirtualCall,-clang-diagnostic-deprecated-declarations;--header-filter=.*/src/.*;--exclude-header-filter=.*vcpkg/.*;--warnings-as-errors=*"
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    - ccache --zero-stats
     - cmake --build build --parallel
+    - ccache --show-stats
 
   artifacts:
     expire_in: 1 day

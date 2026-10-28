@@ -1,3 +1,15 @@
+1.5.45 (28/10/2026)
+Android:
+   * curl now reads CLOCK_MONOTONIC instead of CLOCK_MONOTONIC_RAW. Some Android images, including the API 24 arm64 emulator, run CLOCK_MONOTONIC_RAW at roughly 3x real time and step it backwards by several minutes, which drove `Curl_timeleft()` negative and failed every API request with `CURLE_OPERATION_TIMEDOUT` within milliseconds, mid-handshake. This also leaves the library with a single monotonic clock domain, since boost::asio and std::chrono::steady_clock already use CLOCK_MONOTONIC.
+
+
+1.5.44 (21/10/2026)
+All:
+   * CI build jobs on Windows, macOS and Linux now compile through ccache, and the Windows build job uses Ninja instead of the Visual Studio generator so ccache can take effect.
+   * Removed the `VCPKG_CA_BUNDLE` setting from CI, since vcpkg does not read it.
+   * CI build jobs no longer run clang-tidy; it now runs only in the nightly test jobs.
+
+
 1.5.43 (21/10/2026)
 All:
    * Updated the embedded CA bundle to the curl/Mozilla bundle as of 2026-10-20, which no longer trusts the Comodo AAA Services root that chains the compromised eMudhra intermediates.
