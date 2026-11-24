@@ -1,5 +1,6 @@
 #include "failovercontainer.h"
 
+#include "failovers/dohhttpsfailover.h"
 #include "failovers/hardcodeddomainfailover.h"
 #include "settings.h"
 #include "utils/utils.h"
@@ -10,6 +11,9 @@ FailoverContainer::FailoverContainer(WSNetHttpNetworkManager *httpNetworkManager
     httpNetworkManager_(httpNetworkManager)
 {
     failovers_.push_back(FAILOVER_DEFAULT_HARDCODED);
+    failovers_.push_back(FAILOVER_BACKUP_HARDCODED);
+    failovers_.push_back(FAILOVER_DOH_HTTPS_PRIMARY);
+    failovers_.push_back(FAILOVER_DOH_HTTPS_BACKUP);
 
     for (int i = 0; i < failovers_.size(); i++)
         map_[failovers_[i]] = i;
@@ -55,6 +59,15 @@ std::unique_ptr<BaseFailover> FailoverContainer::failoverById(const std::string 
 
     if (failoverUniqueId == FAILOVER_DEFAULT_HARDCODED) {
         return std::make_unique<HardcodedDomainFailover>(FAILOVER_DEFAULT_HARDCODED, settings.primaryServerDomain());
+    }
+    if (failoverUniqueId == FAILOVER_BACKUP_HARDCODED) {
+        return std::make_unique<HardcodedDomainFailover>(FAILOVER_BACKUP_HARDCODED, "totallyacdn.com");
+    }
+    if (failoverUniqueId == FAILOVER_DOH_HTTPS_PRIMARY) {
+        return std::make_unique<DohHttpsFailover>(FAILOVER_DOH_HTTPS_PRIMARY, httpNetworkManager_, settings.primaryServerDomain());
+    }
+    if (failoverUniqueId == FAILOVER_DOH_HTTPS_BACKUP) {
+        return std::make_unique<DohHttpsFailover>(FAILOVER_DOH_HTTPS_BACKUP, httpNetworkManager_, "totallyacdn.com");
     }
 
     // should not be here

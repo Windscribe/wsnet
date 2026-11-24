@@ -1,6 +1,8 @@
 target_sources(wsnet PRIVATE
     curlnetworkmanager.h
     curlnetworkmanager.cpp
+    dohjsonparser.h
+    dohjsonparser.cpp
     httpnetworkmanager.h
     httpnetworkmanager.cpp
     httpnetworkmanager_impl.h
@@ -9,4 +11,6 @@ target_sources(wsnet PRIVATE
     httprequest.h
     dnscache.cpp
     dnscache.h
+    tlsrecordsplitbio.h
+    tlsrecordsplitbio.cpp
 )

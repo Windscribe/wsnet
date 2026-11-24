@@ -37,8 +37,6 @@ std::shared_ptr<WSNetHttpRequest> serverapi_utils::createHttpRequestWithFailover
 
     if (!failoverData.sniDomain().empty()) {
         httpRequest->setSniDomain(failoverData.sniDomain());
-        // Force-disable Extra Padding for CDN domains
-        httpRequest->setExtraTLSPadding(false);
     }
 
     // Add Authorization header if bearer token is present

@@ -5,6 +5,9 @@
 
 #define FAILOVER_CONTAINER_PUBLIC  1
 #define FAILOVER_DEFAULT_HARDCODED               "300fa426-4640-4a3f-b95c-1f0277462358"
+#define FAILOVER_BACKUP_HARDCODED                "9d6b3f20-4a8e-4e6c-9c52-2e6f2c7b1e01"
+#define FAILOVER_DOH_HTTPS_PRIMARY               "b4c1c8f2-77a3-4b9a-8c34-61e9f3a2d402"
+#define FAILOVER_DOH_HTTPS_BACKUP                "d8e4a291-53b2-4f18-a9e1-74c3b8e9f503"
 
 namespace wsnet {
 

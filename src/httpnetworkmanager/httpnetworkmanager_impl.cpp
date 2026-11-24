@@ -1,5 +1,7 @@
 #include "httpnetworkmanager_impl.h"
+#include <algorithm>
 #include <spdlog/spdlog.h>
+#include "httprequest.h"
 #include "utils/utils.h"
 #include "utils/requesterror.h"
 #include "utils/wsnet_logger.h"
@@ -96,6 +98,11 @@ void HttpNetworkManager_impl::onDnsResolvedImpl(const DnsCacheResult &result)
         return;
     }
 
+    if ((!result.error->isSuccess() || hasPoisonedDnsResult(result.ips)) && request->second.request->overrideIp().empty()) {
+        launchBareIpDohAttempt(result.id, result.error, 0);
+        return;
+    }
+
     if (!result.error->isSuccess()) {
         request->second.callbacks->callFinished(request->second.userDataId, (std::uint32_t)utils::since(request->second.startTime).count(), result.error, std::string());
         requestsMap_.erase(request);
@@ -114,6 +121,172 @@ void HttpNetworkManager_impl::onDnsResolvedImpl(const DnsCacheResult &result)
         whitelistIps(result.ips);
 
     curlNetworkManager_.executeRequest(request->first, request->second.request, result.ips, request->second.request->timeoutMs() - result.elapsedMs);
+}
+
+void HttpNetworkManager_impl::launchBareIpDohAttempt(std::uint64_t origReqId, std::shared_ptr<WSNetRequestError> originalError, std::size_t attemptIdx)
+{
+    auto reqIt = requestsMap_.find(origReqId);
+    if (reqIt == requestsMap_.end()) {
+        return;
+    }
+    RequestData &orig = reqIt->second;
+    if (orig.callbacks->isCanceled()) {
+        requestsMap_.erase(reqIt);
+        return;
+    }
+    const auto elapsed = static_cast<std::uint64_t>(utils::since(orig.startTime).count());
+    const auto &endpoints = bareIpDohEndpoints();
+    if (attemptIdx >= endpoints.size() || orig.request->timeoutMs() <= elapsed + 100) {
+        std::shared_ptr<WSNetRequestError> err = (orig.request->timeoutMs() <= elapsed)
+            ? RequestError::createCaresTimeout()
+            : (originalError && !originalError->isSuccess() ? originalError : RequestError::createCaresTimeout());
+        orig.callbacks->callFinished(orig.userDataId, static_cast<std::uint32_t>(elapsed), err, std::string());
+        requestsMap_.erase(reqIt);
+        return;
+    }
+
+    const std::uint32_t remainingMs = static_cast<std::uint32_t>(orig.request->timeoutMs() - elapsed);
+    const std::uint32_t stepTimeoutMs = std::min<std::uint32_t>(remainingMs, 2500);
+    const auto &ep = endpoints[attemptIdx];
+    const std::string targetHost = !orig.request->sniDomain().empty() ? orig.request->sniDomain() : orig.request->hostname();
+    const bool wantIpv6 = orig.request->ipFamily() == IpFamily::kIpv6;
+    const std::string qtype = wantIpv6 ? "28" : "1";
+    const std::string dohUrl = ep.second + "?name=" + targetHost + "&type=" + qtype;
+
+    auto subReq = std::make_shared<HttpRequest>(dohUrl, stepTimeoutMs, HttpMethod::kGet, orig.request->isIgnoreSslErrors());
+    subReq->setOverrideIp(ep.first);
+    subReq->addHttpHeader("Accept: application/dns-json");
+    subReq->setExtraTLSPadding(false);
+    subReq->setIsWhiteListIps(orig.request->isWhiteListIps());
+    subReq->setIsRemoveFromWhitelistIpsAfterFinish(orig.request->isRemoveFromWhitelistIpsAfterFinish());
+
+    const std::uint64_t subId = curRequestId_++;
+    std::vector<std::string> epIps{ep.first};
+    if (subReq->isWhiteListIps()) {
+        whitelistIps(epIps);
+    }
+
+    internalRequests_[subId] = InternalRequest{
+        [this, origReqId, originalError, attemptIdx, wantIpv6](std::shared_ptr<WSNetRequestError> err, const std::string &body) {
+            auto reqItInner = requestsMap_.find(origReqId);
+            if (reqItInner == requestsMap_.end()) {
+                return;
+            }
+            if (reqItInner->second.callbacks->isCanceled()) {
+                requestsMap_.erase(reqItInner);
+                return;
+            }
+            if (err && err->isSuccess()) {
+                DohLookupParsed parsed = parseDohJsonResponse(body, wantIpv6);
+                if (!parsed.ips.empty()) {
+                    if (reqItInner->second.request->echConfig().empty()) {
+                        launchBareIpDohEchAttempt(origReqId, attemptIdx, parsed.ips);
+                        return;
+                    }
+                    const auto innerElapsed = static_cast<std::uint64_t>(utils::since(reqItInner->second.startTime).count());
+                    if (reqItInner->second.request->timeoutMs() <= innerElapsed) {
+                        reqItInner->second.callbacks->callFinished(reqItInner->second.userDataId, static_cast<std::uint32_t>(innerElapsed), RequestError::createCaresTimeout(), std::string());
+                        requestsMap_.erase(reqItInner);
+                        return;
+                    }
+                    reqItInner->second.ips = parsed.ips;
+                    if (reqItInner->second.request->isWhiteListIps()) {
+                        whitelistIps(parsed.ips);
+                    }
+                    curlNetworkManager_.executeRequest(origReqId, reqItInner->second.request, parsed.ips, static_cast<std::uint32_t>(reqItInner->second.request->timeoutMs() - innerElapsed));
+                    return;
+                }
+            }
+            launchBareIpDohAttempt(origReqId, originalError, attemptIdx + 1);
+        },
+        epIps,
+        subReq->isRemoveFromWhitelistIpsAfterFinish(),
+        std::string()
+    };
+
+    curlNetworkManager_.executeRequest(subId, subReq, epIps, stepTimeoutMs);
+}
+
+void HttpNetworkManager_impl::launchBareIpDohEchAttempt(std::uint64_t origReqId, std::size_t endpointIdx, const std::vector<std::string> &resolvedIps)
+{
+    auto reqIt = requestsMap_.find(origReqId);
+    if (reqIt == requestsMap_.end()) {
+        return;
+    }
+    RequestData &orig = reqIt->second;
+    if (orig.callbacks->isCanceled()) {
+        requestsMap_.erase(reqIt);
+        return;
+    }
+    const auto elapsed = static_cast<std::uint64_t>(utils::since(orig.startTime).count());
+    const auto &endpoints = bareIpDohEndpoints();
+    if (endpointIdx >= endpoints.size() || orig.request->timeoutMs() <= elapsed + 400) {
+        if (orig.request->timeoutMs() <= elapsed) {
+            orig.callbacks->callFinished(orig.userDataId, static_cast<std::uint32_t>(elapsed), RequestError::createCaresTimeout(), std::string());
+            requestsMap_.erase(reqIt);
+            return;
+        }
+        orig.ips = resolvedIps;
+        if (orig.request->isWhiteListIps()) {
+            whitelistIps(resolvedIps);
+        }
+        curlNetworkManager_.executeRequest(origReqId, orig.request, resolvedIps, static_cast<std::uint32_t>(orig.request->timeoutMs() - elapsed));
+        return;
+    }
+
+    const std::uint32_t remainingMs = static_cast<std::uint32_t>(orig.request->timeoutMs() - elapsed);
+    const std::uint32_t stepTimeoutMs = std::min<std::uint32_t>(remainingMs - 200, 1500);
+    const auto &ep = endpoints[endpointIdx];
+    const std::string targetHost = !orig.request->sniDomain().empty() ? orig.request->sniDomain() : orig.request->hostname();
+    const std::string dohUrl = ep.second + "?name=" + targetHost + "&type=65";
+
+    auto subReq = std::make_shared<HttpRequest>(dohUrl, stepTimeoutMs, HttpMethod::kGet, orig.request->isIgnoreSslErrors());
+    subReq->setOverrideIp(ep.first);
+    subReq->addHttpHeader("Accept: application/dns-json");
+    subReq->setExtraTLSPadding(false);
+    subReq->setIsWhiteListIps(orig.request->isWhiteListIps());
+    subReq->setIsRemoveFromWhitelistIpsAfterFinish(orig.request->isRemoveFromWhitelistIpsAfterFinish());
+
+    const std::uint64_t subId = curRequestId_++;
+    std::vector<std::string> epIps{ep.first};
+    if (subReq->isWhiteListIps()) {
+        whitelistIps(epIps);
+    }
+
+    internalRequests_[subId] = InternalRequest{
+        [this, origReqId, resolvedIps](std::shared_ptr<WSNetRequestError> err, const std::string &body) {
+            auto reqItInner = requestsMap_.find(origReqId);
+            if (reqItInner == requestsMap_.end()) {
+                return;
+            }
+            if (reqItInner->second.callbacks->isCanceled()) {
+                requestsMap_.erase(reqItInner);
+                return;
+            }
+            if (err && err->isSuccess()) {
+                DohLookupParsed parsed = parseDohJsonResponse(body, false);
+                if (!parsed.echConfig.empty() && reqItInner->second.request->echConfig().empty()) {
+                    reqItInner->second.request->setEchConfig(parsed.echConfig);
+                }
+            }
+            const auto innerElapsed = static_cast<std::uint64_t>(utils::since(reqItInner->second.startTime).count());
+            if (reqItInner->second.request->timeoutMs() <= innerElapsed) {
+                reqItInner->second.callbacks->callFinished(reqItInner->second.userDataId, static_cast<std::uint32_t>(innerElapsed), RequestError::createCaresTimeout(), std::string());
+                requestsMap_.erase(reqItInner);
+                return;
+            }
+            reqItInner->second.ips = resolvedIps;
+            if (reqItInner->second.request->isWhiteListIps()) {
+                whitelistIps(resolvedIps);
+            }
+            curlNetworkManager_.executeRequest(origReqId, reqItInner->second.request, resolvedIps, static_cast<std::uint32_t>(reqItInner->second.request->timeoutMs() - innerElapsed));
+        },
+        epIps,
+        subReq->isRemoveFromWhitelistIpsAfterFinish(),
+        std::string()
+    };
+
+    curlNetworkManager_.executeRequest(subId, subReq, epIps, stepTimeoutMs);
 }
 
 void HttpNetworkManager_impl::onCurlFinishedCallback(std::uint64_t requestId, std::shared_ptr<WSNetRequestError> error)
@@ -139,6 +312,18 @@ void HttpNetworkManager_impl::onCurlReadyDataCallback(std::uint64_t requestId, c
 
 void HttpNetworkManager_impl::onCurlFinishedCallbackImpl(std::uint64_t requestId, std::shared_ptr<WSNetRequestError> error)
 {
+    auto internalIt = internalRequests_.find(requestId);
+    if (internalIt != internalRequests_.end()) {
+        InternalRequest ir = std::move(internalIt->second);
+        internalRequests_.erase(internalIt);
+        if (ir.removeWhitelistAfterFinish) {
+            removeWhitelistIps(ir.ips);
+        }
+        if (ir.onDone) {
+            ir.onDone(error, ir.data);
+        }
+        return;
+    }
     auto request = requestsMap_.find(requestId);
     if (request != requestsMap_.end()) {
         RequestData &rd = request->second;
@@ -164,6 +349,11 @@ void HttpNetworkManager_impl::onCurlProgressCallbackImpl(std::uint64_t requestId
 
 void HttpNetworkManager_impl::onCurlReadyDataCallbackImpl(std::uint64_t requestId, const std::string &data)
 {
+    auto internalIt = internalRequests_.find(requestId);
+    if (internalIt != internalRequests_.end()) {
+        internalIt->second.data.append(data);
+        return;
+    }
     auto request = requestsMap_.find(requestId);
     if (request != requestsMap_.end()) {
         RequestData &rd = request->second;
