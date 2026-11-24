@@ -6,7 +6,9 @@
 #include "WSNetDnsResolver.h"
 #include "curlnetworkmanager.h"
 #include "dnscache.h"
+#include "dohjsonparser.h"
 #include "utils/cancelablecallback.h"
+#include <functional>
 
 namespace wsnet {
 
@@ -49,13 +51,24 @@ private:
         std::string data;
     };
 
+    struct InternalRequest
+    {
+        std::function<void(std::shared_ptr<WSNetRequestError>, const std::string &)> onDone;
+        std::vector<std::string> ips;
+        bool removeWhitelistAfterFinish = false;
+        std::string data;
+    };
+
     std::map<std::uint64_t, RequestData> requestsMap_;
+    std::map<std::uint64_t, InternalRequest> internalRequests_;
     std::uint64_t curRequestId_ = 0;
 
     std::set<std::string> whitelistIps_;
 
     void onDnsResolvedCallback(const DnsCacheResult &result);
     void onDnsResolvedImpl(const DnsCacheResult &result);
+    void launchBareIpDohAttempt(std::uint64_t origReqId, std::shared_ptr<WSNetRequestError> originalError, std::size_t attemptIdx);
+    void launchBareIpDohEchAttempt(std::uint64_t origReqId, std::size_t endpointIdx, const std::vector<std::string> &resolvedIps);
 
     void onCurlFinishedCallback(std::uint64_t requestId, std::shared_ptr<WSNetRequestError> error);
     void onCurlProgressCallback(std::uint64_t requestId, std::uint64_t bytesReceived, std::uint64_t bytesTotal);
